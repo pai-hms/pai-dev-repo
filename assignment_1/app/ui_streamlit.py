@@ -192,11 +192,11 @@ if len(st.session_state.sessions) >= 2:
             
             # 독립성 검증
             if ("모르" in response3 or "없" in response3) and ("모르" in response4 or "없" in response4):
-                st.success("✅ 세션이 독립적으로 동작합니다! 각 세션은 자신의 주식 정보만 기억합니다.")
+                st.success(" 세션이 독립적으로 동작합니다! 각 세션은 자신의 주식 정보만 기억합니다.")
             elif session2_name.lower() in response3.lower() or session1_name.lower() in response4.lower():
-                st.error("❌ 세션 간 정보가 공유되고 있습니다! 독립성에 문제가 있습니다.")
+                st.error(" 세션 간 정보가 공유되고 있습니다! 독립성에 문제가 있습니다.")
             else:
-                st.warning("⚠️ 예상과 다른 결과입니다.")
+                st.warning(" 예상과 다른 결과입니다.")
         
         # 추가 테스트: 각 세션에서 자신의 주식 정보 확인
         st.markdown("---")
