@@ -1,0 +1,14 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Pytest cache
+.pytest_cache/
+tests/.pytest_cache/
+
+# Environment variables
+.env
+
+# OS metadata
+.DS_Store

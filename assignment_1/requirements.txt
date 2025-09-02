@@ -1,0 +1,14 @@
+# requirements.txt
+fastapi
+uvicorn[standard]
+langchain
+langgraph
+langchain-openai
+python-dotenv
+httpx # 비동기 HTTP 요청
+pytest
+pytest-asyncio
+yfinance
+cachetools
+numexpr
+streamlit 
