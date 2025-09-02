@@ -122,5 +122,15 @@ class SessionManager:
                 return True
         return False
 
-# 전역 세션 매니저 인스턴스
-session_manager = SessionManager()
+# 전역 세션 매니저 인스턴스 (싱글톤 패턴)
+_session_manager_instance = None
+
+def get_session_manager() -> SessionManager:
+    """세션 매니저 싱글톤 인스턴스 반환"""
+    global _session_manager_instance
+    if _session_manager_instance is None:
+        _session_manager_instance = SessionManager()
+    return _session_manager_instance
+
+# 하위 호환성을 위한 별칭
+session_manager = get_session_manager()

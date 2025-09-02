@@ -65,12 +65,13 @@ def should_continue(state: AgentState):
 
 def create_memory_agent_executor():
     """세션별 독립적인 메모리를 가진 에이전트 실행기 생성"""
-    # Chain 기반 에이전트 사용
+    # 각 세션마다 새로운 에이전트 인스턴스 생성
     agent = create_agent() 
     
-    # 각 세션마다 독립적인 메모리 생성
+    # 각 세션마다 완전히 독립적인 메모리 생성
     memory = InMemorySaver()
     
+    # 각 세션마다 새로운 워크플로우 그래프 생성
     workflow = StateGraph(AgentState)
     
     # 노드 추가
