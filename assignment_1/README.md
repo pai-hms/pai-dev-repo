@@ -26,5 +26,5 @@ pytest tests/test_agent.py -v
 pytest tests/test_multiSession.py -v
 
 # 노드 단계별 스트리밍 테스트
-python streaming.py
+python tests/print_streaming.py
 ```

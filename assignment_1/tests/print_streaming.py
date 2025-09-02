@@ -15,7 +15,7 @@ import sys
 import os
 
 # 프로젝트 루트를 Python path에 추가
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_core.messages import HumanMessage
 from app.agents.graph import create_memory_agent_executor
