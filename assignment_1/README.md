@@ -25,6 +25,6 @@ pytest -v
 pytest tests/test_agent.py -v
 pytest tests/test_multiSession.py -v
 
-# 스트리밍 테스트 (상세한 AI 메시지, Tool Calls, Tool Messages 표시)
-python test_streaming.py
+# 스트리밍 테스트
+python streaming.py
 ```
