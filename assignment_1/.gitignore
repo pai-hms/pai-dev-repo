@@ -12,3 +12,5 @@ tests/.pytest_cache/
 
 # OS metadata
 .DS_Store
+
+.PAI_Stock_Chatbot_Complete.ipynb
