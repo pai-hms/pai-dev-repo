@@ -13,6 +13,14 @@ pip install -r requirements.txt
 echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
 ```
 
+## 백엔드 & Streamlit UI 실행
+```bash
+# FastAPI 백엔드 서버 시작
+python -m uvicorn app.main:app --reload
+# Streamlit 웹 인터페이스 시작
+streamlit run app/ui_streamlit.py
+```
+
 ## 테스트 실행
 ```bash
 # 모든 테스트
