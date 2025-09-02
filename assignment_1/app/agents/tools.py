@@ -43,4 +43,7 @@ def calculator(expression: str) -> str:
     return str(numexpr.evaluate(expression))
 
 
-stock_tools = [get_stock_price, calculator]
+stock_tools = [
+    get_stock_price, 
+    calculator
+]
