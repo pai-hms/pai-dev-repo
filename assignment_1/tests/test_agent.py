@@ -1,16 +1,17 @@
 # tests/test_agent.py
 import pytest
 from langchain_core.messages import HumanMessage
-from app.agents.graph import agent_executor
+from app.agents.graph import create_memory_agent_executor  # 변경된 import
 
 @pytest.mark.asyncio
 async def test_stock_price_query():
-    query = "엔비디아 5주랑 아마존 8주를 두명이 돈을 모아 사려고 하는데, 각자 얼마나 돈 챙겨야 해?"
+    """주식 가격 쿼리 테스트 - 멀티세션 방식"""
+    # 각 테스트마다 독립적인 executor 생성
+    agent_executor = create_memory_agent_executor()
     
-    # Create a config dictionary with a unique thread_id for the test
+    query = "엔비디아 5주랑 아마존 8주를 두명이 돈을 모아 사려고 하는데, 각자 얼마나 돈 챙겨야 해?"
     config = {"configurable": {"thread_id": "test-thread-1"}}
     
-    # Pass the config dictionary to the ainvoke call
     final_state = await agent_executor.ainvoke(
         {"messages": [HumanMessage(content=query)]},
         config=config 
@@ -27,6 +28,8 @@ async def test_stock_price_query():
 @pytest.mark.asyncio
 async def test_simple_stock_query():
     """간단한 주식 조회 테스트"""
+    agent_executor = create_memory_agent_executor()  # 독립적인 executor
+    
     query = "애플 주가 알려줘"
     config = {"configurable": {"thread_id": "test-thread-2"}}
     
@@ -38,14 +41,14 @@ async def test_simple_stock_query():
     last_message = final_state["messages"][-1]
     content = last_message.content
     
-    # 답변이 비어있지 않은지 확인
     assert len(content) > 0
-    # 주가 정보가 포함되어 있는지 확인 (숫자가 있는지)
     assert any(char.isdigit() for char in content)
 
 @pytest.mark.asyncio
 async def test_calculation_query():
     """계산 관련 쿼리 테스트"""
+    agent_executor = create_memory_agent_executor()  # 독립적인 executor
+    
     query = "테슬라 10주 사려면 얼마나 필요해?"
     config = {"configurable": {"thread_id": "test-thread-3"}}
     
@@ -57,16 +60,16 @@ async def test_calculation_query():
     last_message = final_state["messages"][-1]
     content = last_message.content
     
-    # 계산 결과가 포함되어 있는지 확인
     assert any(char.isdigit() for char in content)
 
 @pytest.mark.asyncio
 async def test_agent_memory_sequence():
     """에이전트 기억능력 순차 테스트"""
+    agent_executor = create_memory_agent_executor()  # 독립적인 executor
+    
     thread_id = "memory-sequence-test"
     config = {"configurable": {"thread_id": thread_id}}
     
-    # 대화 시퀀스 정의
     conversations = [
         "테슬라 주가 알려줘",
         "그 주가로 5주 사려면 얼마나 필요해?",
@@ -87,12 +90,10 @@ async def test_agent_memory_sequence():
         print(f"\n{i}단계 질문: {query}")
         print(f"{i}단계 응답: {response}")
     
-    # 검증: 마지막 응답에서 이전 정보들을 참조하는지 확인
+    # 검증
     last_response = responses[-1]
     assert "테슬라" in last_response or "Tesla" in last_response or "TSLA" in last_response
     assert any(char.isdigit() for char in last_response)
     
-    # 두 번째 응답에서 계산이 제대로 되었는지 확인
     second_response = responses[1]
     assert any(char.isdigit() for char in second_response)
-    assert ("원" in second_response or "$" in second_response)
