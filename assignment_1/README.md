@@ -16,9 +16,10 @@ echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
 ## 백엔드 & Streamlit UI 실행
 ```bash
 # FastAPI 백엔드 서버 시작
-python -m uvicorn app.main:app --reload
+PYTHONPATH=. python -m uvicorn api.main:app --reload
+
 # Streamlit 웹 인터페이스 시작
-streamlit run app/ui_streamlit.py
+streamlit run webapp/streamlit_app.py
 ```
 
 ## 테스트 실행
@@ -29,10 +30,4 @@ pytest
 # 상세 출력
 pytest -v
 
-# 특정 테스트
-pytest tests/test_agent.py -v
-pytest tests/test_multiSession.py -v
-
-# 노드 단계별 스트리밍 테스트
-python tests/print_streaming.py
 ```

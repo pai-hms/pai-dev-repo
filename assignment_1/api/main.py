@@ -1,6 +1,9 @@
-# app/main.py
+# api/main.py
 from fastapi import FastAPI
-from .api.v1 import chat
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from api.v1 import chat
 
 app = FastAPI(
     title="Stock Agent API",

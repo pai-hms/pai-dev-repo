@@ -1,14 +1,16 @@
 # requirements.txt
-fastapi
-uvicorn[standard]
-langchain
-langgraph
-langchain-openai
-python-dotenv
-httpx # 비동기 HTTP 요청
-pytest
-pytest-asyncio
-yfinance
-cachetools
-numexpr
-streamlit 
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+langchain>=0.1.0
+langgraph>=0.1.0
+langchain-openai>=0.1.0
+python-dotenv>=1.0.0
+httpx>=0.25.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+yfinance>=0.2.0
+cachetools>=5.3.0
+numexpr>=2.8.0
+streamlit>=1.28.0
+pydantic-settings>=2.0.0
+pydantic>=2.0.0

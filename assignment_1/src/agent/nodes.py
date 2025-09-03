@@ -1,7 +1,7 @@
-# app/agents/nodes.py
+# src/agent/nodes.py
 from langchain_core.messages import ToolMessage
 from .state import AgentState
-from .tools import stock_tools
+from ..stock.tools import stock_tools
 
 # 도구를 실행하고 그 결과를 state에 추가하는 노드
 async def tool_node(state: AgentState) -> dict:
@@ -26,6 +26,6 @@ async def tool_node(state: AgentState) -> dict:
     return {"messages": tool_outputs}
 
 # LLM을 호출하여 다음에 할 일을 결정하는 노드
-def agent_node(state: AgentState, agent):
-    result = agent(state)
+def agent_node(state: AgentState, agent_service):
+    result = agent_service.process_state(state)
     return {"messages": [result]}
