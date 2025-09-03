@@ -44,7 +44,7 @@ with st.sidebar:
     cols = st.columns(2)
     for i, stock in enumerate(popular_stocks):
         with cols[i % 2]:
-            if st.button(f"📈 {stock}", key=f"stock_{stock}"):
+            if st.button(f"{stock}", key=f"stock_{stock}"):
                 if stock not in st.session_state.sessions:
                     st.session_state.sessions[stock] = {
                         "thread_id": str(uuid.uuid4()),
@@ -77,11 +77,11 @@ with st.sidebar:
             with col1:
                 # 주식 종목인지 확인하여 아이콘 표시
                 if session_name in popular_stocks:
-                    st.text(f"📈 {session_name}")
+                    st.text(f"{session_name}")
                 else:
-                    st.text(f"💬 {session_name}")
+                    st.text(f"{session_name}")
             with col2:
-                if st.button("🗑️", key=f"delete_{session_name}", help="세션 삭제"):
+                if st.button("삭제", key=f"delete_{session_name}", help="세션 삭제"):
                     del st.session_state.sessions[session_name]
                     st.rerun()
     else:
