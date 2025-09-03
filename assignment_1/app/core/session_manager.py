@@ -1,12 +1,9 @@
 # app/core/session_manager.py
 import asyncio
 from typing import Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.memory import InMemorySaver
 from ..agents.graph import create_memory_agent_executor
-import weakref
-import threading
 
 class SessionManager:
     """멀티세션을 위한 비동기 세션 매니저"""
