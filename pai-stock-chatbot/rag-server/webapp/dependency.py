@@ -1,30 +1,14 @@
 # rag-server/webapp/dependency.py
-from typing import Annotated, Optional
 from dependency_injector.wiring import Provide, inject
-from fastapi import Depends, Header, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-from src.chatbot.service import ChatbotService  
-from src.llm.service import LLMService
-# src.stock 모듈 제거 - Agent Tools로 통합됨
-from src.exceptions import InvalidTokenException, PermissionDeniedException
+from fastapi import Depends
 from webapp.container import StockChatbotContainer
 
-security_scheme = HTTPBearer(auto_error=False)
-
-# === 서비스 의존성들 ===
+# === 핵심 서비스 의존성만 ===
 @inject
 def get_chatbot_service(
     service = Depends(Provide[StockChatbotContainer.chatbot_service])
 ):
     """챗봇 서비스 의존성"""
-    return service
-
-@inject
-def get_llm_service(
-    service = Depends(Provide[StockChatbotContainer.llm_service])
-):
-    """LLM 서비스 의존성"""
     return service
 
 @inject
@@ -34,70 +18,10 @@ def get_chat_session_service(
     """채팅 세션 서비스 의존성"""
     return service
 
-@inject
-def get_agent_executor(
-    executor = Depends(Provide[StockChatbotContainer.agent_executor])
-):
-    """Agent Executor 의존성 - Stock Tools 포함"""
-    return executor
-
-# === 인증 관련 의존성들 ===
-async def api_key_dependency(
-    stock_api_key: Annotated[
-        Optional[str], 
-        Header(alias="Stock-API-Key", description="주식 API 키")
-    ] = None,
-) -> Optional[dict]:
-    """API 키 인증"""
-    if stock_api_key:
-        return {"api_key": stock_api_key, "verified": True}
-    return None
-
-async def user_auth_dependency(
-    credentials: Annotated[
-        Optional[HTTPAuthorizationCredentials], 
-        Depends(security_scheme)
-    ] = None,
-) -> Optional[dict]:
-    """사용자 인증"""
-    if credentials:
-        token = credentials.credentials
-        if len(token) < 10:
-            raise InvalidTokenException("유효하지 않은 토큰입니다")
-        return {
-            "token": token,
-            "user_id": "user_123",
-            "verified": True
-        }
-    return None
-
-def admin_user_dependency(
-    user_auth: Optional[dict] = Depends(user_auth_dependency),
-) -> dict:
-    """관리자 권한 확인"""
-    if not user_auth:
-        raise PermissionDeniedException("인증이 필요합니다")
-    if user_auth.get("user_id") != "admin_user":
-        raise PermissionDeniedException("관리자 권한이 필요합니다")
-    return user_auth
-
+# === 간단한 설정 ===
 def get_app_settings() -> dict:
-    """애플리케이션 설정"""
+    """애플리케이션 기본 설정"""
     return {
-        "debug": True,
         "max_message_length": 1000,
-        "default_stock_currency": "USD",
         "rate_limit": 100
-    }
-
-async def health_check_dependency() -> dict:
-    """헬스체크 정보"""
-    return {
-        "status": "healthy",
-        "timestamp": "2024-01-01T00:00:00Z",
-        "services": {
-            "chatbot": "up",
-            "llm": "up", 
-            "agent": "up"  # stock -> agent로 변경
-        }
     }
