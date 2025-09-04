@@ -4,7 +4,7 @@ from dependency_injector import containers, providers
 
 # 현재 프로젝트의 서비스들
 from src.chatbot.services import ChatbotService
-from src.llm.service import llm_service
+from src.llm.service import LLMService
 from src.stock.services import StockService
 from src.chat_session.repository import ChatSessionRepository
 from src.chat_session.service import ChatSessionService
@@ -22,6 +22,8 @@ class StockChatbotContainer(containers.DeclarativeContainer):
     )
     
     # === Service 계층 ===
+    llm_service = providers.Singleton(LLMService)
+    
     chat_session_service = providers.Singleton(
         ChatSessionService,
         repository=chat_session_repository
@@ -32,15 +34,8 @@ class StockChatbotContainer(containers.DeclarativeContainer):
         session_service=chat_session_service
     )
     
-    # === LLM 서비스 ===
-    llm_service = providers.Singleton(
-        lambda: llm_service  # 기존 싱글톤 인스턴스 사용
-    )
-    
     # === 주식 서비스 ===
-    stock_service = providers.Factory(
-        StockService
-    )
+    stock_service = providers.Factory(StockService)
 
 def preload_dependencies(container: StockChatbotContainer):
     """
@@ -52,8 +47,8 @@ def preload_dependencies(container: StockChatbotContainer):
         # 주요 서비스들 미리 초기화
         container.chat_session_repository()
         container.chat_session_service()
-        container.chatbot_service()
         container.llm_service()
+        container.chatbot_service()
         container.stock_service()
         
         logger.info("Preloading dependencies... done")

@@ -1,5 +1,6 @@
 # src/llm/__init__.py
-from .service import llm_service
-from .settings import settings
+from .service import LLMService
+from .settings import LLMSettings, settings
+from .container import create_llm_container
 
-__all__ = ["llm_service", "settings"]
+__all__ = ["LLMService", "LLMSettings", "settings", "create_llm_container"]
