@@ -1,18 +1,11 @@
 # rag-server/webapp/routers/chat.py
-import sys
-import os
 import json
 import logging
-
-# rag-server 폴더를 Python 경로에 추가
-rag_server_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, rag_server_root)
-
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-from src.chatbot.services import chatbot_service
+from ...src.chatbot.services import chatbot_service
 
 logger = logging.getLogger(__name__)
 

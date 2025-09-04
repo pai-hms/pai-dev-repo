@@ -36,7 +36,6 @@ echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
 ### 가상환경 활성화 방법: uv run 사용
 ```bash
 # 프로젝트 루트에서
-cd rag-server
 uv run uvicorn webapp.main:app --reload
 
 # 프로젝트 루트에서

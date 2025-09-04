@@ -1,13 +1,6 @@
 # rag-server/webapp/main.py
 from fastapi import FastAPI
-import sys
-import os
-
-# rag-server 폴더를 Python 경로에 추가
-rag_server_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(rag_server_root))
-
-from webapp.routers import chat
+from .routers import chat
 
 app = FastAPI(
     title="Stock Agent API",
