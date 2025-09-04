@@ -1,9 +1,14 @@
-# tests/conftest.py
+# tests/conftest.py - 현재 프로젝트에 맞는 간단한 버전
 import pytest
+import logging
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
-from typing import AsyncGenerator
 from datetime import datetime
+from pathlib import Path
 
+from langchain_core.messages import HumanMessage, AIMessage
+
+# 현재 프로젝트 모듈들
 from src.chat_session.repository import ChatSessionRepository
 from src.chat_session.service import ChatSessionService
 from src.chat_session.domains import ChatSession, ChatMessage
@@ -15,33 +20,42 @@ from src.chatbot.domains import ChatbotConfig
 from src.stock.repository import StockRepository
 from src.stock.services import StockService
 
-from src.llm.service import LLMService
-from src.agent.service import AgentService
-
-from langchain_core.messages import HumanMessage, AIMessage
+from src.exceptions import InvalidRequestException, SessionNotFoundException
 
 
-# === Mock 객체들 ===
-@pytest.fixture
-def mock_agent_executor():
-    """Mock Agent Executor"""
-    mock = MagicMock()
-    
-    async def mock_astream(*args, **kwargs):
-        """Mock streaming response"""
-        yield {"messages": [AIMessage(content="테스트 응답입니다.")]}
-    
-    mock.astream = mock_astream
-    return mock
+@pytest.fixture(scope="session")
+def initialize_test_logger():
+    """테스트 로거 초기화"""
+    logger = logging.getLogger()
+    logger.setLevel("INFO")
+    logger.propagate = False
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        fmt="[%(levelname)5s][%(filename)s:%(lineno)s] %(message)s",
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 
-@pytest.fixture
-def mock_llm_service():
-    """Mock LLM Service"""
-    mock = MagicMock(spec=LLMService)
-    mock.get_llm_with_tools = MagicMock(return_value=MagicMock())
-    mock.prepare_messages = MagicMock(return_value=[])
-    return mock
+@pytest.fixture(scope="session")
+def event_loop(initialize_test_logger):
+    """테스트용 이벤트 루프"""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
+def pytest_collection_modifyitems(items):
+    """비동기 테스트에 session 스코프 마커 추가"""
+    from pytest_asyncio import is_async_test
+
+    pytest_asyncio_tests = (item for item in items if is_async_test(item))
+    session_scope_marker = pytest.mark.asyncio(loop_scope="session")
+    for async_test in pytest_asyncio_tests:
+        async_test.add_marker(session_scope_marker, append=False)
 
 
 # === Repository Fixtures ===
@@ -61,6 +75,20 @@ def chatbot_config_repository():
 def stock_repository():
     """Stock Repository"""
     return StockRepository()
+
+
+# === Mock 객체들 ===
+@pytest.fixture
+def mock_agent_executor():
+    """Mock Agent Executor"""
+    mock = MagicMock()
+    
+    async def mock_astream(*args, **kwargs):
+        """Mock streaming response"""
+        yield {"messages": [AIMessage(content="테스트 응답입니다.")]}
+    
+    mock.astream = mock_astream
+    return mock
 
 
 # === Service Fixtures ===
@@ -110,13 +138,13 @@ def sample_chat_message(sample_chat_session):
     )
 
 
+# === 테스트 데이터 ===
 @pytest.fixture
 def sample_query():
     """샘플 질의"""
     return "AAPL 주가 알려줘"
 
 
-# === 테스트 데이터 ===
 @pytest.fixture
 def test_session_id():
     """테스트용 세션 ID"""
@@ -127,3 +155,25 @@ def test_session_id():
 def test_message():
     """테스트용 메시지"""
     return "100 곱하기 1.5는?"
+
+
+# === 초기화 Fixtures ===
+@pytest.fixture
+async def initialize_test_data(
+    sample_chatbot_config,
+    chatbot_config_repository
+):
+    """테스트 데이터 초기화"""
+    # 기본 챗봇 설정 저장
+    chatbot_config_repository.save_config("default", sample_chatbot_config)
+    yield
+    # 정리는 자동으로 됨 (메모리 기반)
+
+
+@pytest.fixture(autouse=True)
+def test_info(request):
+    """테스트 정보 출력"""
+    logger = logging.getLogger()
+    logger.info(f"테스트 시작: {request.node.name}")
+    yield
+    logger.info(f"테스트 완료: {request.node.name}")
