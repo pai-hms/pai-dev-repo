@@ -35,11 +35,13 @@ echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
 
 ### 가상환경 활성화 방법: uv run 사용
 ```bash
-# FastAPI 백엔드 서버 시작
+# 프로젝트 루트에서
+cd rag-server
 uv run uvicorn webapp.main:app --reload
 
-# Streamlit 웹 인터페이스 시작
-uv run streamlit run webapp/streamlit_app.py
+# 프로젝트 루트에서
+cd rag-streamlit-app
+uv run streamlit run streamlit_app.py
 ```
 
 ## 테스트 실행
