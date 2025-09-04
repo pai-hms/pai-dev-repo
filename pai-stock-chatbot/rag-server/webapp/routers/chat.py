@@ -5,7 +5,14 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-from ...src.chatbot.services import chatbot_service
+
+from src.chatbot.services import chatbot_service
+from src.exceptions import (
+    SessionNotFoundException,
+    ChatbotServiceException,
+    StreamingException,
+    InvalidRequestException
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +39,9 @@ async def chat_stream(
 ):
     """스트리밍 엔드포인트"""
     
+    if not request.message.strip():
+        raise InvalidRequestException("메시지가 비어있습니다")
+    
     async def answer_generator():
         try:
             async for chunk in chatbot_service.stream_response(request.message, request.thread_id):
@@ -50,7 +60,13 @@ async def chat_stream(
                         
         except Exception as e:
             logger.error(f"Streaming error: {e}")
-            yield json.dumps({"error": str(e)}, ensure_ascii=False) + "\n"
+            # 스트리밍에서는 JSON 에러만 간단히 응답
+            error_response = {
+                "error": "StreamingException",
+                "message": str(e),
+                "code": "StreamingException"
+            }
+            yield json.dumps(error_response, ensure_ascii=False) + "\n"
 
     return StreamingResponse(answer_generator(), media_type="text/event-stream")
 
@@ -64,10 +80,13 @@ async def get_session_info(
         info = await chatbot_service.get_session_info(thread_id)
         if info:
             return SessionInfoResponse(**info)
-        return None
+        # 커스텀 예외 발생
+        raise SessionNotFoundException(f"세션 {thread_id}을 찾을 수 없습니다")
+    except SessionNotFoundException:
+        raise  # 그대로 다시 발생
     except Exception as e:
         logger.error(f"Session info error: {e}")
-        return None
+        raise ChatbotServiceException(f"세션 정보 조회 중 오류가 발생했습니다: {str(e)}")
 
 @router.delete("/session/{thread_id}")
 async def close_session(
@@ -80,10 +99,12 @@ async def close_session(
         if success:
             return {"message": f"세션 {thread_id}이 종료되었습니다"}
         else:
-            return {"error": "세션을 찾을 수 없습니다"}
+            raise SessionNotFoundException(f"종료할 세션 {thread_id}을 찾을 수 없습니다")
+    except SessionNotFoundException:
+        raise
     except Exception as e:
         logger.error(f"Session close error: {e}")
-        return {"error": "세션 종료 중 오류가 발생했습니다"}
+        raise ChatbotServiceException(f"세션 종료 중 오류가 발생했습니다: {str(e)}")
 
 @router.get("/sessions/active")
 async def get_active_sessions(
@@ -94,4 +115,4 @@ async def get_active_sessions(
         return await chatbot_service.get_all_active_sessions()
     except Exception as e:
         logger.error(f"Active sessions error: {e}")
-        return {"error": "활성 세션 조회 중 오류가 발생했습니다"}
+        raise ChatbotServiceException(f"활성 세션 조회 중 오류가 발생했습니다: {str(e)}")
