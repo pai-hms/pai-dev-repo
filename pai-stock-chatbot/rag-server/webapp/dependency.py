@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.chatbot.service import ChatbotService  
 from src.llm.service import LLMService
-from src.stock.services import StockService
+# src.stock 모듈 제거 - Agent Tools로 통합됨
 from src.exceptions import InvalidTokenException, PermissionDeniedException
 from webapp.container import StockChatbotContainer
 
@@ -28,18 +28,18 @@ def get_llm_service(
     return service
 
 @inject
-def get_stock_service(
-    service = Depends(Provide[StockChatbotContainer.stock_service])
-):
-    """주식 서비스 의존성"""
-    return service
-
-@inject
 def get_chat_session_service(
     service = Depends(Provide[StockChatbotContainer.chat_session_service])
 ):
     """채팅 세션 서비스 의존성"""
     return service
+
+@inject
+def get_agent_executor(
+    executor = Depends(Provide[StockChatbotContainer.agent_executor])
+):
+    """Agent Executor 의존성 - Stock Tools 포함"""
+    return executor
 
 # === 인증 관련 의존성들 ===
 async def api_key_dependency(
@@ -98,6 +98,6 @@ async def health_check_dependency() -> dict:
         "services": {
             "chatbot": "up",
             "llm": "up", 
-            "stock": "up"
+            "agent": "up"  # stock -> agent로 변경
         }
     }

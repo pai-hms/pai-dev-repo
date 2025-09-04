@@ -1,16 +1,17 @@
 # rag-server/src/agent/service.py
 from typing import List
 from .state import AgentState
+from .tools import get_agent_tools  # Stock tools 통합
 from ..llm.service import LLMService
 
 class AgentService:
     """에이전트 비즈니스 서비스"""
     
-    def __init__(self, llm_service: LLMService, tools: List):
-        """완전한 의존성 주입"""
+    def __init__(self, llm_service: LLMService):
+        """간소화된 의존성 주입"""
         self._llm_service = llm_service
-        self._tools = tools
-        self._llm_with_tools = None  # 지연 초기화로 비동기 문제 방지
+        self._tools = get_agent_tools()  # 직접 로드
+        self._llm_with_tools = None
     
     def _get_llm_with_tools(self):
         """LLM with tools 지연 초기화"""

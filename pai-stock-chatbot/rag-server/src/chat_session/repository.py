@@ -17,8 +17,15 @@ class ChatSessionRepository:
         self._sessions[session.session_id] = session
     
     def find_session_by_id(self, session_id: str) -> Optional[ChatSession]:
-        """ID로 세션 조회"""
+        """ID로 세션 조회 - 누락된 메서드 추가"""
         return self._sessions.get(session_id)
+    
+    def find_active_sessions(self) -> Dict[str, ChatSession]:
+        """활성 세션만 조회"""
+        return {
+            sid: session for sid, session in self._sessions.items() 
+            if session.is_active
+        }
     
     def delete_session(self, session_id: str) -> bool:
         """세션 삭제 (관련 데이터 모두 삭제)"""
@@ -33,13 +40,6 @@ class ChatSessionRepository:
     def find_all_sessions(self) -> Dict[str, ChatSession]:
         """모든 세션 조회"""
         return self._sessions.copy()  # 불변성 보장
-    
-    def find_active_sessions(self) -> Dict[str, ChatSession]:
-        """활성 세션만 조회"""
-        return {
-            sid: session for sid, session in self._sessions.items() 
-            if session.is_active
-        }
     
     # === Message 관리 (데이터 주권) ===
     def save_message(self, message: ChatMessage) -> None:

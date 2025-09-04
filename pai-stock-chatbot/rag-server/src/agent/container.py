@@ -3,31 +3,24 @@ from dependency_injector import containers, providers
 from .service import AgentService
 from .graph import AgentGraphFactory
 from .nodes import AgentNodes
+from ..llm.container import LLMContainer
 
 class AgentContainer(containers.DeclarativeContainer):
     """Agent 모듈 DI Container"""
+
+    # LLM Container 의존성
+    llm_container = providers.DependenciesContainer()
     
-    # === External Dependencies ===
-    llm_service = providers.Dependency()
-    stock_tools = providers.Dependency()
-    
-    # === Service ===
+    # === Service (Tools 내장) ===
     service = providers.Singleton(
         AgentService,
-        llm_service=llm_service,
-        tools=stock_tools
+        llm_service=llm_container.service
     )
     
-    # === Nodes ===
-    nodes = providers.Singleton(
-        AgentNodes,
-        agent_service=service
-    )
-    
-    # === Graph Factory ===
+    # === Graph Factory (Service 전달) ===
     graph_factory = providers.Singleton(
         AgentGraphFactory,
-        agent_service=service
+        agent_service=service  # nodes가 아닌 agent_service
     )
     
     # === Executor ===
@@ -36,5 +29,7 @@ class AgentContainer(containers.DeclarativeContainer):
         factory=graph_factory
     )
 
-def create_agent_container() -> AgentContainer:
-    return AgentContainer()
+def create_agent_container(llm_container: LLMContainer) -> AgentContainer:
+    container = AgentContainer()
+    container.llm_container.override(llm_container)
+    return container

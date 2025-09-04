@@ -17,7 +17,6 @@ python -m pytest tests/chat_session/test_chat_session.py -v
 python -m pytest tests/chatbot/test_domains.py -v
 python -m pytest tests/chatbot/test_repository.py -v
 python -m pytest tests/chatbot/test_chatbot.py -v
-python -m pytest tests/stock/test_stock.py -v
 ```
 
 ### 환경변수 방법 (import 오류 시)

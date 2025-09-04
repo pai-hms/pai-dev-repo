@@ -54,9 +54,8 @@ class ChatSessionService:
             session_id=session_id
         )
         
+        # Repository가 메시지 저장과 카운트 증가를 모두 담당 (데이터 주권)
         self._repository.save_message(message)
-        session.increment_message_count()
-        self._repository.save_session(session)
         
         return message
     
