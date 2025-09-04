@@ -2,6 +2,7 @@
 from dependency_injector import containers, providers
 from .service import LLMService
 from .settings import LLMSettings
+from .custom_llm import CustomLLMService
 
 class LLMContainer(containers.DeclarativeContainer):
     """LLM 모듈 DI Container"""
@@ -10,6 +11,11 @@ class LLMContainer(containers.DeclarativeContainer):
     settings = providers.Singleton(LLMSettings)
     
     # === 서비스 ===
+    custom_llm_service = providers.Factory(
+        CustomLLMService,
+        settings=settings
+    )
+    
     llm_service = providers.Singleton(
         LLMService,
         settings=settings
