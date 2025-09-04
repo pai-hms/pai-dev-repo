@@ -1,9 +1,13 @@
-# api/main.py
+# webapp/main.py
 from fastapi import FastAPI
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from api.v1 import chat
+
+# 프로젝트 루트를 Python 경로에 추가
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+from webapp.routers import chat
 
 app = FastAPI(
     title="Stock Agent API",

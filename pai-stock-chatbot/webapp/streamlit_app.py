@@ -1,4 +1,4 @@
-# webapp/simple_app.py - 간소화된 Streamlit 앱
+# webapp/streamlit_app.py - 간소화된 Streamlit 앱
 import streamlit as st
 import httpx
 import uuid
@@ -30,19 +30,19 @@ def stream_chat(message: str, thread_id: str):
                     if chunk.strip():
                         yield chunk
             else:
-                yield f"❌ API 오류: {response.status_code}"
+                yield f"API 오류: {response.status_code}"
     except Exception as e:
-        yield f"❌ 연결 오류: {str(e)}"
+        yield f"연결 오류: {str(e)}"
 
 # 메인 앱
 st.title("🤖 PAI Stock Chatbot")
 
 # API 연결 상태 확인
 if test_api_connection():
-    st.success("✅ 백엔드 연결됨")
+    st.success("백엔드 연결됨")
 else:
-    st.error("❌ 백엔드 연결 실패 - FastAPI 서버를 먼저 실행해주세요")
-    st.code("PYTHONPATH=. python -m uvicorn api.main:app --reload")
+    st.error("백엔드 연결 실패 - FastAPI 서버를 먼저 실행해주세요")
+    st.code("uv run uvicorn webapp.main:app --reload")
     st.stop()
 
 # 세션 ID 초기화
@@ -80,7 +80,7 @@ if prompt := st.chat_input("주식에 대해 물어보세요 (예: AAPL 주가, 
 with st.sidebar:
     st.header("설정")
     
-    if st.button("🗑️ 대화 초기화"):
+    if st.button("대화 초기화"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
@@ -94,6 +94,6 @@ with st.sidebar:
     ]
     
     for example in examples:
-        if st.button(f"💬 {example}", key=f"ex_{example}"):
+        if st.button(f"{example}", key=f"ex_{example}"):
             st.session_state.messages.append({"role": "user", "content": example})
             st.rerun()

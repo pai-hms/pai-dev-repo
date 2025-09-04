@@ -1,11 +1,15 @@
-# api/v1/chat.py
+# webapp/routers/chat.py
+import sys
+import os
+
+# 프로젝트 루트를 Python 경로에 추가
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
+
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 from src.chatbot.services import chatbot_service
 
 router = APIRouter()
