@@ -2,6 +2,7 @@
 import sys
 import os
 import logging
+import uuid
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -36,13 +37,20 @@ def create_app() -> FastAPI:
         title="Stock Agent API",
         description="A streaming chatbot for stock prices using LangGraph and FastAPI.",
         version="1.0.0",
+        openapi_url="/api/openapi.json",
+        docs_url="/api/docs",
+        servers=[
+            {"url": "http://localhost:8000", "description": "Local Development"},
+            {"url": "https://api.stockchatbot.com", "description": "Production"},
+        ],
         lifespan=lifespan,
+        generate_unique_id_function=lambda route: route.name,
     )
 
     # 라우터 등록
     app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 
-    # CORS 미들웨어
+    # 미들웨어
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -52,11 +60,10 @@ def create_app() -> FastAPI:
     )
 
     def get_trace_id():
-        """간단한 trace ID (실제 프로젝트에서는 opentelemetry 사용)"""
-        import uuid
+        """trace ID 생성"""
         return str(uuid.uuid4())[:8]
 
-    # 예외 처리기들
+    # 예외 처리기들 (원본 구조 그대로)
     @app.exception_handler(ClientException)
     async def client_exception_handler(request: Request, exc: ClientException):
         logger.warning(f"Client exception: {exc.message}")
