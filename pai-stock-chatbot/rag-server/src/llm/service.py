@@ -34,46 +34,54 @@ class LLMService:
         
         return vendors
     
+    def _create_openai_model(self, model_name: str, api_key: str, base_url: Optional[str] = None) -> BaseChatModel:
+        """OpenAI 호환 모델 생성 헬퍼 메서드"""
+        kwargs = {
+            "model": model_name,
+            "openai_api_key": api_key,
+            "temperature": self._settings.default_temperature,
+            "max_tokens": self._settings.DEFAULT_MAX_TOKENS
+        }
+        
+        if base_url:
+            kwargs["openai_api_base"] = base_url
+            
+        return ChatOpenAI(**kwargs)
+    
     def create_chat_model_sync(self, model_name: CompletionModelName = None) -> BaseChatModel:
-        """동기 버전 채팅 모델 생성 - 이벤트 루프 문제 해결"""
+        """동기 버전 채팅 모델 생성 - 통합 및 최적화"""
         model_name = model_name or self._config.default_model
         
         # 캐시 확인
         if model_name in self._models_cache:
             return self._models_cache[model_name]
         
-        # OpenAI 모델 생성
-        if model_name.startswith("gpt") or model_name in ["gpt-3.5-turbo", "gpt-4o-mini", "gpt-4o"]:
-            model = ChatOpenAI(
-                model=model_name,
-                openai_api_key=self._settings.OPENAI_API_KEY,
-                temperature=self._settings.default_temperature,
-                max_tokens=self._settings.DEFAULT_MAX_TOKENS
+        # 모델 타입별 생성 로직
+        if self._is_openai_model(model_name):
+            model = self._create_openai_model(
+                model_name=model_name,
+                api_key=self._settings.OPENAI_API_KEY
             )
-            self._models_cache[model_name] = model
-            return model
-        
-        # Custom LLM
-        if self._settings.CUSTOM_LLM_URL:
-            model = ChatOpenAI(
-                model="custom-model",
-                openai_api_key=self._settings.CUSTOM_LLM_API_KEY or "dummy",
-                openai_api_base=f"{self._settings.CUSTOM_LLM_URL}/v1",
-                temperature=self._settings.default_temperature,
-                max_tokens=self._settings.DEFAULT_MAX_TOKENS
+        elif self._settings.CUSTOM_LLM_URL:
+            model = self._create_openai_model(
+                model_name="custom-model",
+                api_key=self._settings.CUSTOM_LLM_API_KEY or "dummy",
+                base_url=f"{self._settings.CUSTOM_LLM_URL}/v1"
             )
-            self._models_cache[model_name] = model
-            return model
+        else:
+            # 기본 모델
+            model = self._create_openai_model(
+                model_name="gpt-4o-mini",
+                api_key=self._settings.OPENAI_API_KEY or "dummy_key"
+            )
         
-        # 기본 모델
-        default_model = ChatOpenAI(
-            model="gpt-4o-mini",
-            openai_api_key=self._settings.OPENAI_API_KEY or "dummy_key",
-            temperature=self._settings.default_temperature,
-            max_tokens=self._settings.DEFAULT_MAX_TOKENS
-        )
-        self._models_cache[model_name] = default_model
-        return default_model
+        self._models_cache[model_name] = model
+        return model
+    
+    def _is_openai_model(self, model_name: str) -> bool:
+        """OpenAI 모델인지 확인"""
+        return (model_name.startswith("gpt") or 
+                model_name in ["gpt-3.5-turbo", "gpt-4o-mini", "gpt-4o"])
     
     async def create_chat_model(self, model_name: CompletionModelName = None) -> BaseChatModel:
         """비동기 버전 채팅 모델 생성"""

@@ -2,7 +2,6 @@
 from dependency_injector import containers, providers
 from .service import AgentService
 from .graph import AgentGraphFactory
-from .nodes import AgentNodes
 from ..llm.container import LLMContainer
 
 class AgentContainer(containers.DeclarativeContainer):

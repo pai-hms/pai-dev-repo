@@ -80,6 +80,9 @@ def calculator(expression: str) -> str:
     except Exception as e:
         return f"계산 오류: {e}"
 
+# 도구 목록을 모듈 레벨에서 한 번만 생성 (최적화)
+AGENT_TOOLS = [get_stock_price, calculator]
+
 def get_agent_tools() -> List:
-    """Agent에서 사용할 도구 목록"""
-    return [get_stock_price, calculator]
+    """Agent에서 사용할 도구 목록 반환"""
+    return AGENT_TOOLS
