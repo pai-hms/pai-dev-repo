@@ -1,4 +1,4 @@
-# tests/conftest.py - 현재 프로젝트에 맞는 간단한 버전
+# tests/conftest.py
 import pytest
 import logging
 import asyncio
@@ -69,6 +69,19 @@ def chatbot_config_repository():
 
 
 # === Mock 객체들 ===
+@pytest.fixture
+def mock_llm_service():
+    """Mock LLM Service"""
+    mock = MagicMock()
+    
+    # Mock methods
+    mock.prepare_messages.return_value = [HumanMessage(content="test")]
+    mock.get_llm_with_tools.return_value = MagicMock()
+    mock.get_llm_with_tools.return_value.invoke.return_value = AIMessage(content="test response")
+    
+    return mock
+
+
 @pytest.fixture
 def mock_agent_executor():
     """Mock Agent Executor"""

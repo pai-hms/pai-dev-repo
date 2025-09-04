@@ -18,8 +18,3 @@ python -m pytest tests/chatbot/test_domains.py -v
 python -m pytest tests/chatbot/test_repository.py -v
 python -m pytest tests/chatbot/test_chatbot.py -v
 ```
-
-### 환경변수 방법 (import 오류 시)
-```bash
-PYTHONPATH=$PWD python -m pytest tests/ -v
-```
