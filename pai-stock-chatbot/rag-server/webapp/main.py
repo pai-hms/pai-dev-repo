@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
 from webapp.routers import chat
+from webapp.container import create_container  #컨테이너 추가
 from src.exceptions import (
     AuthorizationException,
     ClientException,
@@ -26,14 +27,19 @@ from src.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-def create_app() -> FastAPI:
+def _setup_lifespan(container):
+    """애플리케이션 생명주기 설정"""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         logger.info("Setting up Stock Chatbot application")
+        app.container = container
         yield
         logger.info("Tearing down Stock Chatbot application")
+    return lifespan
 
-    app = FastAPI(
+def _create_fastapi_app(lifespan_manager) -> FastAPI:
+    """FastAPI 앱 인스턴스 생성"""
+    return FastAPI(
         title="Stock Agent API",
         description="A streaming chatbot for stock prices using LangGraph and FastAPI.",
         version="1.0.0",
@@ -43,9 +49,27 @@ def create_app() -> FastAPI:
             {"url": "http://localhost:8000", "description": "Local Development"},
             {"url": "https://api.stockchatbot.com", "description": "Production"},
         ],
-        lifespan=lifespan,
+        lifespan=lifespan_manager,
         generate_unique_id_function=lambda route: route.name,
     )
+
+def _setup_container_and_wiring():
+    """DI 컨테이너 설정 및 와이어링"""
+    container = create_container()
+    container.wire(modules=["webapp.dependency", "webapp.routers.chat"])
+    return container
+
+def create_app() -> FastAPI:
+    """애플리케이션 생성 및 설정"""
+    # 컨테이너 설정
+    container = _setup_container_and_wiring()
+    
+    # 생명주기 관리자 설정
+    lifespan_manager = _setup_lifespan(container)
+    
+    # FastAPI 앱 생성
+    app = _create_fastapi_app(lifespan_manager)
+    app.container = container
 
     # 라우터 등록
     app.include_router(chat.router, prefix="/api/v1", tags=["chat"])

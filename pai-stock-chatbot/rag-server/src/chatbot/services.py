@@ -3,14 +3,14 @@ from langchain_core.messages import HumanMessage
 from ..agent.graph import get_agent_executor
 from ..chat_session.service import ChatSessionService
 
-class ChatBotService:
+class ChatbotService:  # ChatBotService → ChatbotService로 변경
     """통합 챗봇 서비스"""
     
-    def __init__(self):
+    def __init__(self, session_service=None):
         self._executor = get_agent_executor()
-        self._session_service = ChatSessionService()
+        self._session_service = session_service or ChatSessionService()
     
-    async def stream_response(self, message: str, thread_id: str):
+    async def stream_response(self, thread_id: str, message: str):
         """스트리밍 응답"""
         session = await self._session_service.get_or_create_session(thread_id)
         session.increment_message_count()
@@ -46,5 +46,5 @@ class ChatBotService:
                 active_sessions.append(info)
         return {"active_sessions": active_sessions, "count": len(active_sessions)}
 
-# 싱글톤 인스턴스
-chatbot_service = ChatBotService()
+# 싱글톤 인스턴스 (DI Container에서 관리하므로 제거 예정)
+# chatbot_service = ChatbotService()  # DI Container로 이관

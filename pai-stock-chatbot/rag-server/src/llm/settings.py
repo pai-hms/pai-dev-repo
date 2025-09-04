@@ -1,20 +1,23 @@
 # rag-server/src/llm/settings.py
+import os
+from pathlib import Path
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 class LLMSettings(BaseSettings):
-    """LLM 설정 관리"""
+    """LLM 관련 설정"""
     
-    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
-    OPENAI_MODEL: str = Field(default="gpt-4.1-mini-2025-04-14", env="OPENAI_MODEL")
-    OPENAI_TEMPERATURE: float = Field(default=0.1, env="OPENAI_TEMPERATURE")
-    SYSTEM_PROMPT: str = Field(
-        default="당신은 주가 계산을 도와주는 AI Agent입니다.", 
-        env="SYSTEM_PROMPT"
-    )
+    # OpenAI 설정
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-3.5-turbo"
+    OPENAI_TEMPERATURE: float = 0.1
     
-    class Config:
-        env_file = ".env"
+    # 시스템 프롬프트
+    SYSTEM_PROMPT: str = """당신은 주식 정보와 계산을 도와주는 AI 어시스턴트입니다."""
 
-# 싱글톤
+    class Config:
+        # 프로젝트 루트의 .env 파일 참조
+        env_file = Path(__file__).parent.parent.parent.parent / ".env"
+        case_sensitive = True
+
+# 싱글톤 인스턴스
 settings = LLMSettings()

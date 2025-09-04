@@ -4,7 +4,6 @@ import logging
 from fastapi import APIRouter, Depends, Path
 from fastapi.responses import StreamingResponse
 
-from src.chatbot.services import chatbot_service
 from src.exceptions import (
     SessionNotFoundException,
     ChatbotServiceException,
@@ -36,19 +35,22 @@ async def chat_stream(
     if not request.message.strip():
         raise InvalidRequestException("메시지가 비어있습니다")
     
+    def _format_chunk(chunk) -> str:
+        """청크 데이터 포맷팅"""
+        if isinstance(chunk, str):
+            return chunk
+        
+        try:
+            if hasattr(chunk, 'model_dump_json'):
+                return chunk.model_dump_json() + "\n"
+            return json.dumps({"content": str(chunk)}, ensure_ascii=False) + "\n"
+        except Exception:
+            return str(chunk)
+    
     async def answer_generator():
         try:
-            async for chunk in chatbot_service.stream_response(request.message, request.thread_id):
-                if isinstance(chunk, str):
-                    yield chunk
-                else:
-                    try:
-                        if hasattr(chunk, 'model_dump_json'):
-                            yield chunk.model_dump_json() + "\n"
-                        else:
-                            yield json.dumps({"content": str(chunk)}, ensure_ascii=False) + "\n"
-                    except Exception:
-                        yield str(chunk)
+            async for chunk in chatbot_service.stream_response(request.thread_id, request.message):
+                yield _format_chunk(chunk)
         except Exception as e:
             logger.error(f"Streaming error: {e}")
             yield json.dumps({"error": str(e)}, ensure_ascii=False) + "\n"
