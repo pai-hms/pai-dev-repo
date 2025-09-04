@@ -17,9 +17,6 @@ from src.chatbot.repository import ChatbotConfigRepository
 from src.chatbot.service import ChatbotService
 from src.chatbot.domains import ChatbotConfig
 
-from src.stock.repository import StockRepository
-from src.stock.services import StockService
-
 from src.exceptions import InvalidRequestException, SessionNotFoundException
 
 
@@ -71,12 +68,6 @@ def chatbot_config_repository():
     return ChatbotConfigRepository()
 
 
-@pytest.fixture
-def stock_repository():
-    """Stock Repository"""
-    return StockRepository()
-
-
 # === Mock 객체들 ===
 @pytest.fixture
 def mock_agent_executor():
@@ -106,12 +97,6 @@ def chatbot_service(chat_session_service, chatbot_config_repository, mock_agent_
         config_repository=chatbot_config_repository,
         agent_executor=mock_agent_executor
     )
-
-
-@pytest.fixture
-def stock_service(stock_repository):
-    """Stock Service"""
-    return StockService(repository=stock_repository)
 
 
 # === Domain Object Fixtures ===

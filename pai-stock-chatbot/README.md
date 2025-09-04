@@ -23,6 +23,7 @@ uv sync --dev
 
 ### 백엔드 서버 실행
 ```bash
+cd rag-server
 uv run uvicorn webapp.main:app --reload
 ```
 
