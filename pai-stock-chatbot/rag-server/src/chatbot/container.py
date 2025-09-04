@@ -1,14 +1,13 @@
 # rag-server/src/chatbot/container.py
 from dependency_injector import containers, providers
-from .repository import ChatbotConfigRepository  # 올바른 클래스명
+from .repository import ChatbotConfigRepository
 from .service import ChatbotService
-from src.chat_session.service import ChatSessionService
 
 class ChatbotContainer(containers.DeclarativeContainer):
-    """Chatbot 모듈 DI Container - 수정됨"""
+    """Chatbot 모듈 DI Container"""
     
     # === 외부 의존성 ===
-    chat_session_service = providers.Dependency()
+    chat_session_service = providers.Dependency()  # Chat Session Service 주입
     agent_executor = providers.Dependency()
     
     # === Repository 계층 ===
@@ -23,5 +22,4 @@ class ChatbotContainer(containers.DeclarativeContainer):
     )
 
 def create_chatbot_container() -> ChatbotContainer:
-    """Chatbot Container 생성"""
     return ChatbotContainer()

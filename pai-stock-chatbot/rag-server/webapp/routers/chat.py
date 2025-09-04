@@ -49,7 +49,7 @@ async def chat_stream(
     
     async def answer_generator():
         try:
-            async for chunk in chatbot_service.stream_response(request.thread_id, request.message):
+            async for chunk in chatbot_service.stream_response(session_id=request.thread_id, message=request.message):
                 yield _format_chunk(chunk)
         except Exception as e:
             logger.error(f"Streaming error: {e}")
