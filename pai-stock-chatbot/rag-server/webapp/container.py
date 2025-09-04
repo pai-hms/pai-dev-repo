@@ -2,12 +2,13 @@
 import logging
 from dependency_injector import containers, providers
 
-# 현재 프로젝트의 서비스들
-from src.chatbot.services import ChatbotService
-from src.llm.service import LLMService
-from src.stock.services import StockService
-from src.chat_session.repository import ChatSessionRepository
-from src.chat_session.service import ChatSessionService
+# 모듈별 Container import만
+from src.stock.container import create_stock_container
+from src.agent.container import create_agent_container
+from src.llm.container import create_llm_container
+from src.chatbot.container import create_chatbot_container
+from src.chat_session.container import create_chat_session_container
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,50 +17,69 @@ class StockChatbotContainer(containers.DeclarativeContainer):
     
     wiring_config = containers.WiringConfiguration(packages=["webapp"])
     
-    # === Repository 계층 ===
-    chat_session_repository = providers.Singleton(
-        ChatSessionRepository
+    # === Module Containers ===
+    stock_container = providers.DependenciesContainer()
+    llm_container = providers.DependenciesContainer()
+    agent_container = providers.DependenciesContainer()
+    chat_session_container = providers.DependenciesContainer()  # 추가
+    chatbot_container = providers.DependenciesContainer()
+    
+    # === Service Layer ===
+    llm_service = providers.Singleton(
+        lambda container: container.service(),
+        container=llm_container
     )
     
-    # === Service 계층 ===
-    llm_service = providers.Singleton(LLMService)
+    stock_service = providers.Singleton(
+        lambda container: container.service(),
+        container=stock_container
+    )
     
+    stock_tools = providers.Singleton(
+        lambda container: container.tools(),
+        container=stock_container
+    )
+    
+    agent_executor = providers.Singleton(
+        lambda container: container.executor(),
+        container=agent_container
+    )
+    
+    # Chat Session Service 추가
     chat_session_service = providers.Singleton(
-        ChatSessionService,
-        repository=chat_session_repository
+        lambda container: container.service(),
+        container=chat_session_container
     )
     
     chatbot_service = providers.Singleton(
-        ChatbotService,
-        session_service=chat_session_service
+        lambda container: container.service(),
+        container=chatbot_container
     )
-    
-    # === 주식 서비스 ===
-    stock_service = providers.Factory(StockService)
-
-def preload_dependencies(container: StockChatbotContainer):
-    """
-    첫 API 응답 속도 향상을 위한 의존성 사전 로딩
-    """
-    try:
-        logger.info("Preloading dependencies...")
-        
-        # 주요 서비스들 미리 초기화
-        container.chat_session_repository()
-        container.chat_session_service()
-        container.llm_service()
-        container.chatbot_service()
-        container.stock_service()
-        
-        logger.info("Preloading dependencies... done")
-    except Exception as e:
-        logger.error(f"Failed to preload dependencies: {e}")
 
 def create_container() -> StockChatbotContainer:
     """컨테이너 생성 및 초기화"""
     container = StockChatbotContainer()
     
-    # 의존성 사전 로딩
-    preload_dependencies(container)
+    # 모듈별 Container 생성
+    stock_container = create_stock_container()
+    llm_container = create_llm_container()
+    agent_container = create_agent_container()
+    chat_session_container = create_chat_session_container()  # 추가
+    chatbot_container = create_chatbot_container()
+    
+    # Container 간 의존성 주입
+    agent_container.llm_service.override(llm_container.service)
+    agent_container.stock_tools.override(stock_container.tools)
+    
+    # Chatbot Container에 Chat Session Service 주입
+    chatbot_container.chat_session_service.override(chat_session_container.service)
+    chatbot_container.agent_executor.override(agent_container.executor)
+    
+    # Container 등록
+    container.stock_container.override(stock_container)
+    container.llm_container.override(llm_container)
+    container.agent_container.override(agent_container)
+    container.chat_session_container.override(chat_session_container)  # 추가
+    container.chatbot_container.override(chatbot_container)
     
     return container

@@ -7,20 +7,21 @@ from .custom_llm import CustomLLMService
 class LLMContainer(containers.DeclarativeContainer):
     """LLM 모듈 DI Container"""
     
-    # === 설정 ===
+    # === Settings ===
     settings = providers.Singleton(LLMSettings)
     
-    # === 서비스 ===
-    custom_llm_service = providers.Factory(
+    # === Custom LLM Service ===
+    custom_llm_service = providers.Singleton(
         CustomLLMService,
         settings=settings
     )
     
-    llm_service = providers.Singleton(
+    # === Main Service ===
+    service = providers.Singleton(
         LLMService,
-        settings=settings
+        settings=settings,
+        custom_llm_service=custom_llm_service
     )
 
 def create_llm_container() -> LLMContainer:
-    """LLM Container 생성"""
     return LLMContainer()
