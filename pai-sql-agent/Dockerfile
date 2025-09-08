@@ -1,28 +1,32 @@
 FROM python:3.11-slim
+
 WORKDIR /app
 
-# 시스템 의존성
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev curl \
- && rm -rf /var/lib/apt/lists/*
+# 시스템 의존성 설치
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Poetry
-RUN pip install --no-cache-dir poetry
+# Poetry 설치
+RUN pip install poetry
 
-# Poetry 설정 (프로젝트 내부 .venv 유지)
+# Poetry 설정
 ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_CACHE_DIR=/root/.cache/pypoetry
+    POETRY_VENV_IN_PROJECT=1 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
 
-# 의존성만 설치
-COPY pyproject.toml poetry.lock* ./
-# alembic 이 dev 그룹에 있다면 --with dev(또는 --with migrations) 추가
-RUN poetry install --no-root --only main --with migrations
+# pyproject.toml 복사
+COPY pyproject.toml ./
 
-# 소스 복사
+# 의존성 설치
+RUN poetry install --only=main --no-root && rm -rf $POETRY_CACHE_DIR
+
+# 소스 코드 복사
 COPY . .
 
 EXPOSE 8000
 
-# venv 를 확실히 사용해서 실행
-CMD ["/bin/sh", "-lc", ". .venv/bin/activate && alembic upgrade head && uvicorn webapp.main:app --host 0.0.0.0 --port 8000"]
+# Poetry 가상환경을 직접 활성화하고 실행
+CMD ["sh", "-c", ". /app/.venv/bin/activate && uvicorn webapp.main:app --host 0.0.0.0 --port 8000"]
