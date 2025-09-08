@@ -19,12 +19,26 @@ class AgentService:
             self._llm_with_tools = self._llm_service.get_llm_with_tools(self._tools)
         return self._llm_with_tools
     
+    def _get_streaming_llm_with_tools(self):
+        """스트리밍용 LLM with tools 지연 초기화"""
+        return self._llm_service.get_streaming_llm_with_tools(self._tools)
+    
     def process_state(self, state: AgentState):
         """상태 처리"""
         messages = state["messages"]
         prepared_messages = self._llm_service.prepare_messages(messages)
         llm_with_tools = self._get_llm_with_tools()
         return llm_with_tools.invoke(prepared_messages)
+    
+    async def process_state_streaming(self, state: AgentState):
+        """스트리밍 상태 처리"""
+        messages = state["messages"]
+        prepared_messages = self._llm_service.prepare_messages(messages)
+        llm_with_tools = self._get_streaming_llm_with_tools()
+        
+        # 스트리밍으로 응답 생성
+        async for chunk in llm_with_tools.astream(prepared_messages):
+            yield chunk
     
     def get_tools(self):
         """도구 목록 반환"""

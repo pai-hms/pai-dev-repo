@@ -19,6 +19,16 @@ class AgentGraphFactory:
         result = self._agent_service.process_state(state)
         return {"messages": [result]}
     
+    async def streaming_agent_node(self, state: AgentState):
+        """스트리밍 Agent 실행 노드"""
+        messages = []
+        async for chunk in self._agent_service.process_state_streaming(state):
+            messages.append(chunk)
+            yield {"messages": [chunk]}
+        
+        # 최종 상태 반환
+        return {"messages": messages}
+    
     async def tool_node(self, state: AgentState) -> dict:
         """도구 실행 노드"""
         last_message = state["messages"][-1]

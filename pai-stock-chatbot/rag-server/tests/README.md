@@ -13,8 +13,4 @@ python -m pytest tests/chatbot/ -v
 
 # 특정 파일 테스트
 python -m pytest tests/agent/test_agent.py -v
-python -m pytest tests/chat_session/test_chat_session.py -v
-python -m pytest tests/chatbot_session/test_domains.py -v
-python -m pytest tests/chatbot_session/test_repository.py -v
-python -m pytest tests/chatbot/test_chatbot.py -v
 ```

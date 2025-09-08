@@ -36,26 +36,55 @@ async def chat_stream(
         raise InvalidRequestException("메시지가 비어있습니다")
     
     def _format_chunk(chunk) -> str:
-        """청크 데이터 포맷팅"""
+        """청크 데이터 포맷팅 - 개선된 버전"""
         if isinstance(chunk, str):
-            return chunk
+            # 문자열 청크를 JSON 형태로 래핑
+            return json.dumps({"content": chunk}, ensure_ascii=False) + "\n"
         
         try:
             if hasattr(chunk, 'model_dump_json'):
                 return chunk.model_dump_json() + "\n"
             return json.dumps({"content": str(chunk)}, ensure_ascii=False) + "\n"
-        except Exception:
-            return str(chunk)
+        except Exception as e:
+            logger.warning(f"Chunk formatting error: {e}")
+            return json.dumps({"content": str(chunk)}, ensure_ascii=False) + "\n"
     
     async def answer_generator():
         try:
-            async for chunk in chatbot_service.stream_response(session_id=request.thread_id, message=request.message):
+            logger.info(f"Starting stream for session: {request.thread_id}")
+            
+            chunk_count = 0
+            async for chunk in chatbot_service.stream_response(
+                session_id=request.thread_id, 
+                message=request.message
+            ):
+                chunk_count += 1
+                logger.debug(f"Yielding chunk {chunk_count}: {chunk[:100]}...")
                 yield _format_chunk(chunk)
+            
+            logger.info(f"Stream completed with {chunk_count} chunks")
+            
         except Exception as e:
-            logger.error(f"Streaming error: {e}")
-            yield json.dumps({"error": str(e)}, ensure_ascii=False) + "\n"
+            logger.error(f"Streaming error: {e}", exc_info=True)
+            error_response = json.dumps({
+                "error": str(e),
+                "type": "streaming_error"
+            }, ensure_ascii=False) + "\n"
+            yield error_response
 
-    return StreamingResponse(answer_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        answer_generator(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Nginx 버퍼링 비활성화
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 @router.get(
     "/sessions/{thread_id}",

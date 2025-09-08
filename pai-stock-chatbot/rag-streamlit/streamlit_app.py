@@ -2,6 +2,7 @@
 import streamlit as st
 import httpx
 import uuid
+import json
 
 st.set_page_config(page_title="PAI Stock Chatbot", layout="centered")
 
@@ -17,25 +18,41 @@ def test_api_connection():
         return False
 
 def stream_chat(message: str, thread_id: str):
-    """간단한 채팅 스트리밍"""
+    """개선된 채팅 스트리밍"""
     try:
         with httpx.stream(
             "POST",
             f"{API_URL}/stream",
-            json={"message": message, "thread_id": thread_id},
+            json={"message": message, "threadId": thread_id},  # camelCase 사용
             timeout=30.0,
+            headers={"Accept": "text/event-stream"}
         ) as response:
             if response.status_code == 200:
                 for chunk in response.iter_text():
                     if chunk.strip():
-                        yield chunk
+                        try:
+                            # JSON 파싱 시도
+                            chunk_data = json.loads(chunk.strip())
+                            if "content" in chunk_data:
+                                yield chunk_data["content"]
+                            elif "error" in chunk_data:
+                                yield f"❌ 오류: {chunk_data['error']}"
+                            else:
+                                yield chunk.strip()
+                        except json.JSONDecodeError:
+                            # JSON이 아닌 경우 그대로 출력
+                            yield chunk.strip()
             else:
-                yield f"❌ API 오류: {response.status_code}"
+                yield f"❌ API 오류: {response.status_code} - {response.text}"
+    except httpx.TimeoutException:
+        yield "❌ 요청 시간 초과"
+    except httpx.ConnectError:
+        yield "❌ 서버 연결 실패"
     except Exception as e:
         yield f"❌ 연결 오류: {str(e)}"
 
 def process_user_input(prompt: str):
-    """사용자 입력 처리 및 챗봇 응답 받기"""
+    """실시간 토큰 스트리밍 처리"""
     # 사용자 메시지 추가
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -46,14 +63,47 @@ def process_user_input(prompt: str):
         response_placeholder = st.empty()
         full_response = ""
         
-        for chunk in stream_chat(prompt, st.session_state.thread_id):
-            full_response += chunk
-            response_placeholder.markdown(full_response + "▌")
+        # 첫 토큰 수신 시간 측정
+        import time
+        start_time = time.time()
+        first_token_time = None
         
+        chunk_count = 0
+        for chunk in stream_chat(prompt, st.session_state.thread_id):
+            chunk_count += 1
+            if chunk:  # 빈 청크 무시
+                # 첫 토큰 수신 시간 기록
+                if first_token_time is None:
+                    first_token_time = time.time() - start_time
+                    st.caption(f"⚡ 첫 토큰 수신: {first_token_time:.2f}초")
+                
+                full_response += chunk
+                # 실시간 타이핑 효과 (커서 없이 즉시 표시)
+                response_placeholder.markdown(full_response + "▌")
+                
+                # 매우 짧은 지연으로 자연스러운 타이핑 효과
+                time.sleep(0.01)
+        
+        # 최종 응답 (커서 제거)
         response_placeholder.markdown(full_response)
+        
+        # 성능 정보 표시
+        total_time = time.time() - start_time
+        if st.session_state.get("debug_mode", False):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.caption(f"📊 청크 수: {chunk_count}")
+            with col2:
+                st.caption(f"⏱️ 총 시간: {total_time:.2f}초")
+            with col3:
+                if first_token_time:
+                    st.caption(f"🚀 첫 토큰: {first_token_time:.2f}초")
     
     # 응답 저장
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+    if full_response.strip():
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
+    else:
+        st.error("응답을 받지 못했습니다. 다시 시도해주세요.")
 
 # 메인 앱
 st.title("🤖 PAI Stock Chatbot")
@@ -95,6 +145,13 @@ if prompt := st.chat_input("주식에 대해 물어보세요 (예: AAPL 주가, 
 # 사이드바 - 간단한 컨트롤
 with st.sidebar:
     st.header("⚙️ 설정")
+    
+    # 디버그 모드 토글
+    st.session_state.debug_mode = st.checkbox(
+        "🔍 디버그 모드", 
+        value=st.session_state.get("debug_mode", False),
+        help="스트리밍 성능 정보를 표시합니다"
+    )
     
     if st.button("🗑️ 대화 초기화"):
         st.session_state.messages = []

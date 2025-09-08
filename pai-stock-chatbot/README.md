@@ -33,8 +33,3 @@ cd rag-streamlit
 uv run streamlit run streamlit_app.py
 ```
 
-## 테스트 실행
-```bash
-cd rag-server
-uv run pytest
-```

@@ -57,15 +57,28 @@ class ChatbotService:
         # 챗봇 설정 로드
         chatbot_config = self._config_repository.get_config(session.chatbot_id)
         
-        # AI 응답 생성
+        # AI 응답 생성 및 스트리밍
         response_generated = False
-        async for content in self._execute_agent_stream(session_id, message, chatbot_config):
-            if content:
-                validated_content = self._validate_content(content)
-                # AI 응답 저장 (세션 서비스에 위임)
-                await self._session_service.save_message(session_id, validated_content, "assistant")
-                response_generated = True
-                yield validated_content
+        full_response = ""  # 전체 응답 누적
+        
+        try:
+            async for content in self._execute_agent_stream(session_id, message, chatbot_config):
+                if content:
+                    validated_content = self._validate_content(content)
+                    full_response += validated_content
+                    response_generated = True
+                    yield validated_content  # 청크별로 스트리밍
+            
+            # 전체 응답을 한 번만 저장
+            if response_generated and full_response:
+                await self._session_service.save_message(session_id, full_response, "assistant")
+            
+        except Exception as e:
+            logger.error(f"Streaming error: {e}")
+            error_msg = "죄송합니다. 응답 생성 중 오류가 발생했습니다."
+            await self._session_service.save_message(session_id, error_msg, "assistant")
+            yield error_msg
+            return
         
         if not response_generated:
             fallback_msg = "죄송합니다. 응답을 생성할 수 없습니다."
@@ -140,21 +153,54 @@ class ChatbotService:
             raise InvalidRequestException("허용되지 않는 문자가 포함되어 있습니다")
     
     async def _execute_agent_stream(self, session_id: str, message: str, config: ChatbotConfig) -> AsyncGenerator[str, None]:
-        """AI 에이전트 실행"""
+        """AI 에이전트 실행 - 실시간 토큰 스트리밍"""
         try:
             agent_config = {"configurable": {"thread_id": session_id}}
+            
+            logger.info(f"Starting streaming agent execution for session: {session_id}")
+            
+            chunk_count = 0
+            current_response = ""
             
             async for chunk in self._agent_executor.astream(
                 {"messages": [HumanMessage(content=message.strip())]}, 
                 config=agent_config
             ):
-                content = self._extract_content_from_chunk(chunk)
-                if content:
-                    yield content
+                chunk_count += 1
+                logger.debug(f"Received chunk {chunk_count}: {type(chunk)}")
+                
+                # 청크에서 새로운 토큰 추출
+                new_content = self._extract_streaming_content(chunk, current_response)
+                if new_content:
+                    logger.debug(f"New streaming content: '{new_content}'")
+                    current_response += new_content
+                    yield new_content  # 즉시 새 토큰만 전송
+                else:
+                    logger.debug(f"No new content in chunk {chunk_count}")
+            
+            logger.info(f"Streaming completed with {chunk_count} chunks, total length: {len(current_response)}")
                     
         except Exception as e:
-            logger.error(f"Agent execution failed: {e}")
+            logger.error(f"Agent execution failed: {e}", exc_info=True)
             raise ChatbotServiceException(f"AI 응답 생성 중 오류가 발생했습니다: {str(e)}")
+    
+    def _extract_streaming_content(self, chunk, current_response: str) -> Optional[str]:
+        """스트리밍 청크에서 새로운 토큰만 추출"""
+        if not isinstance(chunk, dict):
+            return None
+        
+        # 전체 컨텐츠 추출
+        full_content = self._extract_content_from_chunk(chunk)
+        if not full_content:
+            return None
+        
+        # 이미 받은 부분 제외하고 새로운 부분만 반환
+        if full_content.startswith(current_response):
+            new_content = full_content[len(current_response):]
+            return new_content if new_content else None
+        
+        # 완전히 새로운 메시지인 경우 (도구 호출 결과 등)
+        return full_content
     
     def _validate_content(self, content: str) -> str:
         """응답 컨텐츠 검증"""
@@ -167,20 +213,48 @@ class ChatbotService:
         return content.strip()
     
     def _extract_content_from_chunk(self, chunk) -> Optional[str]:
-        """청크에서 컨텐츠 추출"""
+        """LangGraph 청크에서 컨텐츠 추출 - 개선된 버전"""
         if not isinstance(chunk, dict):
             return None
         
-        if "messages" in chunk:
-            for msg in chunk["messages"]:
-                if hasattr(msg, 'content') and msg.content:
-                    return msg.content
+        logger.debug(f"Processing chunk: {chunk}")
         
+        # LangGraph 청크 구조 분석
+        # 1. 직접 messages 키 확인
+        if "messages" in chunk:
+            messages = chunk["messages"]
+            if isinstance(messages, list):
+                for msg in messages:
+                    if hasattr(msg, 'content') and msg.content:
+                        return msg.content
+        
+        # 2. agent 노드의 응답 확인
         if "agent" in chunk:
             agent_data = chunk["agent"]
             if isinstance(agent_data, dict) and "messages" in agent_data:
-                for msg in agent_data["messages"]:
-                    if hasattr(msg, 'content') and msg.content:
-                        return msg.content
+                messages = agent_data["messages"]
+                if isinstance(messages, list):
+                    for msg in messages:
+                        if hasattr(msg, 'content') and msg.content:
+                            return msg.content
+        
+        # 3. tools 노드의 응답 확인
+        if "tools" in chunk:
+            tools_data = chunk["tools"]
+            if isinstance(tools_data, dict) and "messages" in tools_data:
+                messages = tools_data["messages"]
+                if isinstance(messages, list):
+                    for msg in messages:
+                        if hasattr(msg, 'content') and msg.content:
+                            return msg.content
+        
+        # 4. 기타 가능한 구조들
+        for key, value in chunk.items():
+            if isinstance(value, dict) and "messages" in value:
+                messages = value["messages"]
+                if isinstance(messages, list):
+                    for msg in messages:
+                        if hasattr(msg, 'content') and msg.content:
+                            return msg.content
         
         return None

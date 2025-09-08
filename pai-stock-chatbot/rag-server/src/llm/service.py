@@ -92,6 +92,14 @@ class LLMService:
         model = self.create_chat_model_sync(model_name)
         return model.bind_tools(tools)
     
+    def get_streaming_llm_with_tools(self, tools, model_name: CompletionModelName = None):
+        """스트리밍용 도구 바인딩된 LLM 반환"""
+        model = self.create_chat_model_sync(model_name)
+        # 스트리밍을 위해 streaming=True 설정
+        if hasattr(model, 'streaming'):
+            model.streaming = True
+        return model.bind_tools(tools)
+    
     def prepare_messages(self, messages):
         """시스템 메시지 추가"""
         system_msg = SystemMessage(content=self._config.system_prompt)
