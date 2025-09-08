@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(description="OpenAI API 키")
     
     # SGIS API 설정
-    sgis_access_key: str = Field(description="SGIS 액세스 키")
-    sgis_secret_key: str = Field(description="SGIS 시크릿 키")
+    sgis_service_id: str = Field(description="SGIS 서비스 ID")  # 변경
+    sgis_security_key: str = Field(description="SGIS 보안 키")  # 변경
     sgis_base_url: str = Field(
         default="https://sgisapi.kostat.go.kr/OpenAPI3",
         description="SGIS API 기본 URL"

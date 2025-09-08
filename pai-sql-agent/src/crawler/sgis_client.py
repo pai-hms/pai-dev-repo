@@ -47,56 +47,29 @@ class SGISResponse:
         """에러 메시지 반환"""
         return self.err_msg if not self.is_success else None
 
-
+# src/crawler/sgis_client.py
 class SGISClient:
-    """SGIS API 클라이언트"""
-    
     def __init__(self) -> None:
         self.settings = get_settings()
         self.base_url = self.settings.sgis_base_url
-        self.access_key = self.settings.sgis_access_key
-        self.secret_key = self.settings.sgis_secret_key
+        self.service_id = self.settings.sgis_service_id      # 변경
+        self.security_key = self.settings.sgis_security_key  # 변경
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
-        
-        # API 엔드포인트 매핑
-        self.endpoints = {
-            SGISDataType.POPULATION: "/stats/population.json",
-            SGISDataType.HOUSEHOLD: "/stats/household.json",
-            SGISDataType.HOUSE: "/stats/house.json",
-            SGISDataType.COMPANY: "/stats/company.json",
-            SGISDataType.INDUSTRY_CODE: "/stats/industrycode.json",
-            SGISDataType.FARM_HOUSEHOLD: "/stats/farmhousehold.json",
-            SGISDataType.FORESTRY_HOUSEHOLD: "/stats/forestryhousehold.json",
-            SGISDataType.FISHERY_HOUSEHOLD: "/stats/fisheryhousehold.json",
-            SGISDataType.HOUSEHOLD_MEMBER: "/stats/householdmember.json",
-        }
-    
+
     async def _get_access_token(self) -> str:
-        """액세스 토큰 획득"""
+        """액세스 토큰 획득 - SGIS 표준 방식"""
         # 토큰이 유효한지 확인
         if (self._access_token and 
             self._token_expires_at and 
             datetime.now() < self._token_expires_at):
             return self._access_token
         
-        # 새 토큰 요청
-        timestamp = str(int(time.time() * 1000))
-        
-        # HMAC-SHA256 서명 생성
-        message = f"{self.access_key}{timestamp}"
-        signature = hmac.new(
-            self.secret_key.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
-        
+        # SGIS 표준 인증 방식
         auth_url = f"{self.base_url}/auth/authentication.json"
         auth_data = {
-            "consumer_key": self.access_key,
-            "consumer_secret": self.secret_key,
-            "timestamp": timestamp,
-            "signature": signature
+            "consumer_key": self.service_id,      # 서비스 ID
+            "consumer_secret": self.security_key  # 보안 키
         }
         
         async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
@@ -108,10 +81,8 @@ class SGISClient:
                 raise ValueError(f"인증 실패: {auth_result.get('errMsg')}")
             
             self._access_token = auth_result["result"]["accessToken"]
-            # 토큰 만료 시간을 1시간으로 설정 (여유를 두고 55분)
-            self._token_expires_at = datetime.now().replace(
-                minute=datetime.now().minute + 55
-            )
+            # 토큰 만료 시간을 4시간으로 설정 (여유를 두고 3시간 50분)
+            self._token_expires_at = datetime.now() + timedelta(hours=3, minutes=50)
             
             return self._access_token
     

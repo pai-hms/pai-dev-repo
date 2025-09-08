@@ -1,49 +1,36 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: pai-sql-agent-postgres
     environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: pai_sql_agent
-      POSTGRES_USER: pai_user
-      POSTGRES_PASSWORD: pai_password
-    ports:
-      - "5432:5432"
+    ports: ["5432:5432"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init:/docker-entrypoint-initdb.d
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pai_user -d pai_sql_agent"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pai_sql_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
   app:
     build: .
     container_name: pai-sql-agent-app
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - SGIS_API_KEY=${SGIS_API_KEY:-}
+      - SGIS_SECRET_KEY=${SGIS_SECRET_KEY:-}
+      - LOG_LEVEL=INFO
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      - DATABASE_URL=postgresql://pai_user:pai_password@postgres:5432/pai_sql_agent
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - SGIS_ACCESS_KEY=${SGIS_ACCESS_KEY}
-      - SGIS_SECRET_KEY=${SGIS_SECRET_KEY}
-    ports:
-      - "8000:8000"
-      - "8501:8501"
-    volumes:
-      - .:/app
+    ports: ["8000:8000"]
     restart: unless-stopped
-    command: >
-      sh -c "
-        sleep 10 &&
-        poetry run alembic upgrade head &&
-        poetry run uvicorn webapp.main:app --host 0.0.0.0 --port 8000 --reload &
-        poetry run streamlit run webapp/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
-      "
+    # command는 Dockerfile의 CMD 사용 → 따로 안 써도 됨
 
 volumes:
   postgres_data:

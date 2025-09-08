@@ -110,7 +110,7 @@ def upgrade() -> None:
         sa.Column('checkpoint_id', sa.String(255), nullable=False, comment='체크포인트 ID'),
         sa.Column('parent_checkpoint_id', sa.String(255), nullable=True, comment='부모 체크포인트 ID'),
         sa.Column('checkpoint_data', sa.Text(), nullable=False, comment='체크포인트 데이터 (JSON)'),
-        sa.Column('metadata_data', sa.Text(), nullable=True, comment='메타데이터 (JSON)'),
+        sa.Column('meta_data', sa.Text(), nullable=True, comment='메타데이터 (JSON)'),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint('id')

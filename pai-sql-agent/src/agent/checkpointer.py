@@ -35,7 +35,7 @@ class CheckpointRecord(CheckpointBase):
     
     # 체크포인트 데이터
     checkpoint_data = Column(Text, nullable=False, comment="체크포인트 데이터 (JSON)")
-    metadata_data = Column(Text, nullable=True, comment="메타데이터 (JSON)")
+    meta_data = Column(Text, nullable=True, comment="메타데이터 (JSON)")
     
     # 타임스탬프
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -79,7 +79,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
             async with self.db_manager.get_async_session() as session:
                 # 최신 체크포인트 조회
                 query = text("""
-                    SELECT checkpoint_data, metadata_data 
+                    SELECT checkpoint_data, meta_data 
                     FROM langgraph_checkpoints 
                     WHERE thread_id = :thread_id 
                     ORDER BY created_at DESC 
@@ -97,7 +97,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                 # JSON 파싱
                 checkpoint_data = json.loads(row[0])
                 metadata_raw = row[1]
-                metadata_data = json.loads(metadata_raw) if metadata_raw else {}
+                meta_data = json.loads(metadata_raw) if metadata_raw else {}
                 
                 # Checkpoint 객체 생성
                 checkpoint = Checkpoint(
@@ -110,10 +110,10 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                 )
                 
                 metadata = CheckpointMetadata(
-                    source=metadata_data.get("source", "input"),
-                    step=metadata_data.get("step", -1),
-                    writes=metadata_data.get("writes", {}),
-                    parents=metadata_data.get("parents", {})
+                    source=meta_data.get("source", "input"),
+                    step=meta_data.get("step", -1),
+                    writes=meta_data.get("writes", {}),
+                    parents=meta_data.get("parents", {})
                 )
                 
                 return (checkpoint, metadata)
@@ -160,7 +160,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                 "versions_seen": checkpoint.versions_seen
             }
             
-            metadata_data = {
+            meta_data = {
                 "source": metadata.source,
                 "step": metadata.step,
                 "writes": metadata.writes,
@@ -187,7 +187,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                     update_query = text("""
                         UPDATE langgraph_checkpoints 
                         SET checkpoint_data = :checkpoint_data,
-                            metadata_data = :metadata_data,
+                            meta_data = :meta_data,
                             updated_at = :updated_at
                         WHERE thread_id = :thread_id AND checkpoint_id = :checkpoint_id
                     """)
@@ -197,7 +197,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                             "thread_id": thread_id,
                             "checkpoint_id": checkpoint.id,
                             "checkpoint_data": json.dumps(checkpoint_data),
-                            "metadata_data": json.dumps(metadata_data),
+                            "meta_data": json.dumps(meta_data),
                             "updated_at": datetime.utcnow()
                         }
                     )
@@ -205,8 +205,8 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                     # 삽입
                     insert_query = text("""
                         INSERT INTO langgraph_checkpoints 
-                        (id, thread_id, checkpoint_id, checkpoint_data, metadata_data, created_at, updated_at)
-                        VALUES (:id, :thread_id, :checkpoint_id, :checkpoint_data, :metadata_data, :created_at, :updated_at)
+                        (id, thread_id, checkpoint_id, checkpoint_data, meta_data, created_at, updated_at)
+                        VALUES (:id, :thread_id, :checkpoint_id, :checkpoint_data, :meta_data, :created_at, :updated_at)
                     """)
                     
                     await session.execute(
@@ -215,7 +215,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                             "thread_id": thread_id,
                             "checkpoint_id": checkpoint.id,
                             "checkpoint_data": json.dumps(checkpoint_data),
-                            "metadata_data": json.dumps(metadata_data),
+                            "meta_data": json.dumps(meta_data),
                             "created_at": datetime.utcnow(),
                             "updated_at": datetime.utcnow()
                         }
@@ -260,7 +260,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
             async with self.db_manager.get_async_session() as session:
                 # 쿼리 구성
                 base_query = """
-                    SELECT checkpoint_data, metadata_data 
+                    SELECT checkpoint_data, meta_data 
                     FROM langgraph_checkpoints 
                     WHERE thread_id = :thread_id
                 """
@@ -283,7 +283,7 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                 for row in rows:
                     checkpoint_data = json.loads(row[0])
                     metadata_raw = row[1]
-                    metadata_data = json.loads(metadata_raw) if metadata_raw else {}
+                    meta_data = json.loads(metadata_raw) if metadata_raw else {}
                     
                     checkpoint = Checkpoint(
                         v=checkpoint_data.get("v", 1),
@@ -295,10 +295,10 @@ class PostgresCheckpointSaver(BaseCheckpointSaver):
                     )
                     
                     metadata = CheckpointMetadata(
-                        source=metadata_data.get("source", "input"),
-                        step=metadata_data.get("step", -1),
-                        writes=metadata_data.get("writes", {}),
-                        parents=metadata_data.get("parents", {})
+                        source=meta_data.get("source", "input"),
+                        step=meta_data.get("step", -1),
+                        writes=meta_data.get("writes", {}),
+                        parents=meta_data.get("parents", {})
                     )
                     
                     checkpoints.append((checkpoint, metadata))
