@@ -12,7 +12,7 @@ class AgentSettings(BaseSettings):
     
     # LLM 설정
     OPENAI_API_KEY: str = app_settings.openai_api_key or ""
-    MODEL_NAME: str = "gpt-4-turbo-preview"
+    MODEL_NAME: str = "gpt-4o-mini"
     TEMPERATURE: float = 0.0
     
     # 에이전트 설정
