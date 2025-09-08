@@ -1,186 +1,193 @@
-"""LangGraph 기반 SQL Agent 구현."""
+"""
+LangGraph 그래프 정의
+에이전트의 워크플로우를 정의하고 관리
+"""
+import logging
+from typing import Dict, Any, AsyncGenerator, Optional
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.graph import CompiledGraph
 
-from typing import Dict, Any, Optional
-
-from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, END
-from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
-
-from src.config import settings
-from src.agent.nodes import LangAgentNode, LangGraphAgentState
-from src.agent.prompt import PromptGenerator
-from src.agent.tools import SQLQueryTool, SchemaInfoToolWrapper
-from src.agent.checkpointer import PostgreSQLCheckpointSaver
+from src.agent.nodes import (
+    analyze_question, execute_tools, generate_response, 
+    should_continue, create_agent_state
+)
+from src.agent.checkpointer import get_postgres_checkpointer
 
 
-class SQLAgent:
-    """설계 원칙을 따르는 지방자치단체 예산 분석용 SQL 에이전트."""
+logger = logging.getLogger(__name__)
+
+
+class SQLAgentGraph:
+    """SQL 에이전트 그래프"""
     
-    def __init__(self):
-        """SQL 에이전트 초기화."""
-        self.llm = ChatOpenAI(
-            model="gpt-4-turbo-preview",
-            temperature=0,
-            api_key=settings.openai_api_key,
+    def __init__(self, enable_checkpointer: bool = True):
+        self.enable_checkpointer = enable_checkpointer
+        self._compiled_graph: Optional[CompiledGraph] = None
+    
+    def _create_graph(self) -> StateGraph:
+        """그래프 생성"""
+        # 상태 그래프 초기화
+        workflow = StateGraph(dict)
+        
+        # 노드 추가
+        workflow.add_node("analyze_question", analyze_question)
+        workflow.add_node("execute_tools", execute_tools)
+        workflow.add_node("generate_response", generate_response)
+        
+        # 엣지 추가
+        workflow.add_edge(START, "analyze_question")
+        
+        # 조건부 엣지 추가
+        workflow.add_conditional_edges(
+            "analyze_question",
+            should_continue,
+            {
+                "execute_tools": "execute_tools",
+                "generate_response": "generate_response",
+                "end": END
+            }
         )
         
-        # 도구 초기화
-        self.sql_tool = SQLQueryTool()
-        self.schema_tool = SchemaInfoToolWrapper()
-        self.tools = {"sql_agent": self.sql_tool, "schema_info": self.schema_tool}
-        
-        # 프롬프트 생성기 초기화
-        self.prompt_generator = PromptGenerator()
-        
-        # 체크포인터 초기화
-        self.checkpointer = PostgreSQLCheckpointSaver()
-        
-        # 그래프 구축
-        self.graph = self._build_graph()
-
-    def _build_graph(self) -> CompiledStateGraph:
-        """선형 원리를 따르는 에이전트 그래프 구축."""
-        # 노드 선언
-        tools = [self.sql_tool, self.schema_tool]
-        
-        agent_node = LangAgentNode(
-            llm=self.llm,
-            tools=self.tools,
-            prompt_generator=self.prompt_generator,
+        workflow.add_conditional_edges(
+            "execute_tools",
+            should_continue,
+            {
+                "execute_tools": "execute_tools",
+                "generate_response": "generate_response",
+                "end": END
+            }
         )
-        tool_node = ToolNode(tools)
-
-        # 그래프 생성
-        graph = (
-            StateGraph(LangGraphAgentState)
-            .add_node("agent", agent_node)
-            .add_node("tools", tool_node)
-            .set_entry_point("agent")
-            .add_conditional_edges("agent", tools_condition)
-            .add_edge("tools", "agent")
+        
+        workflow.add_conditional_edges(
+            "generate_response",
+            should_continue,
+            {
+                "execute_tools": "execute_tools",
+                "generate_response": "generate_response",
+                "end": END
+            }
         )
-
-        # 체크포인터와 함께 컴파일
-        return graph.compile(checkpointer=self.checkpointer)
-
-    async def process_question(
+        
+        return workflow
+    
+    async def get_compiled_graph(self) -> CompiledGraph:
+        """컴파일된 그래프 반환"""
+        if self._compiled_graph is None:
+            workflow = self._create_graph()
+            
+            if self.enable_checkpointer:
+                # PostgreSQL 체크포인터 사용
+                checkpointer = await get_postgres_checkpointer()
+                self._compiled_graph = workflow.compile(checkpointer=checkpointer)
+            else:
+                self._compiled_graph = workflow.compile()
+        
+        return self._compiled_graph
+    
+    async def invoke_query(
         self, 
         question: str, 
-        thread_id: Optional[str] = None
+        config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """사용자 질문을 처리하고 응답 반환."""
-        from datetime import datetime
-        from langchain_core.messages import HumanMessage
-        
-        # 초기 상태 생성
-        initial_state = {
-            "messages": [HumanMessage(content=question)],
-            "query": question,
-            "sql_query": "",
-            "data": {},
-        }
-        
-        # 영속성을 위한 thread_id 설정
-        config = {
-            "configurable": {
-                "thread_id": thread_id or f"thread_{datetime.now().isoformat()}",
-                "sql_agent": True,
-            }
-        }
-        
-        # 그래프 실행
-        final_state = await self.graph.ainvoke(initial_state, config)
-        
-        # 최종 응답 추출
-        messages = final_state["messages"]
-        final_message = messages[-1] if messages else None
-        
-        return {
-            "response": final_message.content if final_message else "응답이 생성되지 않았습니다",
-            "thread_id": config["configurable"]["thread_id"],
-            "sql_query": final_state.get("sql_query"),
-            "data": final_state.get("data"),
-        }
-    
-    async def stream_response(
-        self, 
-        question: str, 
-        thread_id: Optional[str] = None
-    ):
-        """실시간 업데이트를 위한 에이전트 응답 스트리밍."""
-        from datetime import datetime
-        from langchain_core.messages import HumanMessage
-        
-        # 초기 상태 생성
-        initial_state = {
-            "messages": [HumanMessage(content=question)],
-            "query": question,
-            "sql_query": "",
-            "data": {},
-        }
-        
-        # 영속성을 위한 thread_id 설정
-        config = {
-            "configurable": {
-                "thread_id": thread_id or f"thread_{datetime.now().isoformat()}",
-                "sql_agent": True,
-            }
-        }
-        
-        # 그래프 실행 스트리밍
-        async for chunk in self.graph.astream(initial_state, config):
-            yield chunk
-
-
-def create_sql_agent() -> CompiledStateGraph:
-    """SQL 에이전트를 생성합니다."""
-    agent = SQLAgent()
-    return agent.graph
-
-
-class AgentService:
-    """데이터 주권 원칙을 따르는 SQL 에이전트 서비스 레이어."""
-    
-    def __init__(self):
-        self.agent = SQLAgent()
-    
-    async def ask_question(
-        self, 
-        question: str, 
-        thread_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """SQL 에이전트에게 질문하기."""
+        """쿼리 실행 (단일 응답)"""
         try:
-            result = await self.agent.process_question(question, thread_id)
-            return {
-                "success": True,
-                "data": result,
-                "error": None,
-            }
+            # 초기 상태 생성
+            initial_state = create_agent_state(question).__dict__
+            
+            # 그래프 실행
+            graph = await self.get_compiled_graph()
+            result = await graph.ainvoke(initial_state, config=config)
+            
+            return result
+            
         except Exception as e:
+            logger.error(f"쿼리 실행 중 오류: {str(e)}")
             return {
-                "success": False,
-                "data": None,
-                "error": str(e),
+                "error_message": f"쿼리 실행 중 오류가 발생했습니다: {str(e)}",
+                "is_complete": True,
+                "messages": []
             }
     
-    async def stream_question(
+    async def stream_query(
         self, 
         question: str, 
-        thread_id: Optional[str] = None
-    ):
-        """실시간 업데이트를 위한 에이전트 응답 스트리밍."""
+        config: Optional[Dict[str, Any]] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """쿼리 실행 (스트리밍)"""
         try:
-            async for chunk in self.agent.stream_response(question, thread_id):
-                yield {
-                    "success": True,
-                    "data": chunk,
-                    "error": None,
-                }
+            # 초기 상태 생성
+            initial_state = create_agent_state(question).__dict__
+            
+            # 그래프 스트리밍 실행
+            graph = await self.get_compiled_graph()
+            
+            async for chunk in graph.astream(initial_state, config=config):
+                yield chunk
+                
         except Exception as e:
+            logger.error(f"스트리밍 쿼리 실행 중 오류: {str(e)}")
             yield {
-                "success": False,
-                "data": None,
-                "error": str(e),
+                "error_message": f"스트리밍 실행 중 오류가 발생했습니다: {str(e)}",
+                "is_complete": True,
+                "messages": []
             }
+    
+    async def stream_messages(
+        self, 
+        question: str, 
+        config: Optional[Dict[str, Any]] = None
+    ) -> AsyncGenerator[str, None]:
+        """메시지 단위 스트리밍"""
+        try:
+            # 초기 상태 생성
+            initial_state = create_agent_state(question).__dict__
+            
+            # 그래프 스트리밍 실행
+            graph = await self.get_compiled_graph()
+            
+            async for chunk in graph.astream(
+                initial_state, 
+                config=config,
+                stream_mode="messages"
+            ):
+                # 메시지 청크 처리
+                if isinstance(chunk, (list, tuple)) and len(chunk) > 0:
+                    message = chunk[0]
+                    if hasattr(message, 'content'):
+                        # AI 메시지의 컨텐츠만 스트리밍
+                        if hasattr(message, 'type') and message.type == 'ai':
+                            if hasattr(message.content, '__iter__') and not isinstance(message.content, str):
+                                # 청크 단위 컨텐츠
+                                for content_chunk in message.content:
+                                    if hasattr(content_chunk, 'text'):
+                                        yield content_chunk.text
+                                    elif isinstance(content_chunk, str):
+                                        yield content_chunk
+                            else:
+                                # 전체 컨텐츠
+                                yield str(message.content)
+                
+        except Exception as e:
+            logger.error(f"메시지 스트리밍 중 오류: {str(e)}")
+            yield f"오류: {str(e)}"
+
+
+# 전역 그래프 인스턴스
+_sql_agent_graph: Optional[SQLAgentGraph] = None
+
+
+def get_sql_agent_graph(enable_checkpointer: bool = True) -> SQLAgentGraph:
+    """SQL 에이전트 그래프 인스턴스 반환"""
+    global _sql_agent_graph
+    if _sql_agent_graph is None:
+        _sql_agent_graph = SQLAgentGraph(enable_checkpointer=enable_checkpointer)
+    return _sql_agent_graph
+
+
+async def create_session_config(session_id: str) -> Dict[str, Any]:
+    """세션 설정 생성"""
+    return {
+        "configurable": {
+            "thread_id": session_id
+        }
+    }

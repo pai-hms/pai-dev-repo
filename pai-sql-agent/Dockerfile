@@ -1,33 +1,33 @@
-# PAI SQL Agent Dockerfile - UV 올바른 사용
 FROM python:3.11-slim
 
+WORKDIR /app
 
-# 시스템 패키지 설치
+# 시스템 의존성 설치
 RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
+    build-essential \
     libpq-dev \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# UV 설치
-RUN pip install --no-cache-dir uv
+# Poetry 설치
+RUN pip install poetry
 
-# 프로젝트 파일 복사
+# Poetry 설정
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VENV_IN_PROJECT=1 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+# 의존성 파일 복사
+COPY pyproject.toml poetry.lock* ./
+
+# 의존성 설치
+RUN poetry install --no-dev && rm -rf $POETRY_CACHE_DIR
+
+# 소스 코드 복사
 COPY . .
 
-# UV로 의존성 설치 (pyproject.toml 기반)
-RUN uv sync --no-dev --frozen
+# 환경 변수 설정
+ENV PATH="/app/.venv/bin:$PATH"
 
-# 로그 디렉토리 생성
-RUN mkdir -p /app/logs
+EXPOSE 8000 8501
 
-# 포트 노출
-EXPOSE 8000
-
-# 헬스체크
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# 실행 명령어
-CMD ["uv", "run", "uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000"]

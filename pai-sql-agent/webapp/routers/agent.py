@@ -1,267 +1,160 @@
-"""Agent API routes with JSON streaming support."""
-
+import time
 import json
 import uuid
+import logging
 from typing import AsyncGenerator
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from sse_starlette.sse import EventSourceResponse
+from langchain_core.messages import AIMessage
 
-from webapp.models import QuestionRequest, AgentResponse, StreamChunk
-from webapp.dependencies import get_agent_service
-from src.agent.graph import AgentService
+from webapp.models import QueryRequest, QueryResponse, StreamChunk
+from src.agent.graph import get_sql_agent_graph, create_session_config
 
-router = APIRouter(prefix="/agent", tags=["agent"])
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
-@router.post("/ask", response_model=AgentResponse)
-async def ask_question(
-    request: QuestionRequest,
-    agent_service: AgentService = Depends(get_agent_service),
-) -> AgentResponse:
-    """Ask a question to the SQL agent."""
+@router.post("/query", response_model=QueryResponse)
+async def query_sql_agent(request: QueryRequest) -> QueryResponse:
+    """SQL Agent에 질문을 보내고 응답을 받습니다"""
+    start_time = time.time()
+    
     try:
-        result = await agent_service.ask_question(
-            question=request.question,
-            thread_id=request.thread_id,
+        # 세션 ID 생성 (없는 경우)
+        session_id = request.session_id or str(uuid.uuid4())
+        
+        # 에이전트 그래프 가져오기
+        agent_graph = get_sql_agent_graph()
+        
+        # 세션 설정 생성
+        config = await create_session_config(session_id)
+        
+        # 쿼리 실행
+        result = await agent_graph.invoke_query(request.question, config)
+        
+        # 결과 파싱
+        processing_time = time.time() - start_time
+        
+        if result.get("error_message"):
+            return QueryResponse(
+                success=False,
+                message="쿼리 처리 중 오류가 발생했습니다.",
+                error_message=result["error_message"],
+                session_id=session_id,
+                processing_time=processing_time
+            )
+        
+        # 메시지에서 응답과 SQL 결과 추출
+        messages = result.get("messages", [])
+        final_message = ""
+        sql_queries = result.get("sql_results", [])
+        
+        # 마지막 AI 메시지 찾기
+        for msg in reversed(messages):
+            if hasattr(msg, 'type') and msg.type == 'ai' and hasattr(msg, 'content'):
+                final_message = str(msg.content)
+                break
+        
+        return QueryResponse(
+            success=True,
+            message=final_message or "쿼리가 성공적으로 처리되었습니다.",
+            sql_queries=sql_queries,
+            session_id=session_id,
+            processing_time=processing_time
         )
         
-        if result["success"]:
-            data = result["data"]
-            return AgentResponse(
-                success=True,
-                response=data.get("response"),
-                thread_id=data.get("thread_id"),
-                iteration_count=data.get("iteration_count"),
-                sql_query=data.get("sql_query"),
-                query_result=data.get("query_result"),
-            )
-        else:
-            return AgentResponse(
-                success=False,
-                error=result["error"],
-            )
-    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"SQL Agent 쿼리 처리 중 오류: {str(e)}")
+        processing_time = time.time() - start_time
+        
+        return QueryResponse(
+            success=False,
+            message="내부 서버 오류가 발생했습니다.",
+            error_message=str(e),
+            session_id=request.session_id or str(uuid.uuid4()),
+            processing_time=processing_time
+        )
 
 
-@router.post("/stream")
-async def stream_question(
-    request: QuestionRequest,
-    agent_service: AgentService = Depends(get_agent_service),
-):
-    """Stream agent response with Server-Sent Events."""
+@router.post("/query/stream")
+async def stream_sql_agent(request: QueryRequest):
+    """SQL Agent에 질문을 보내고 스트리밍 응답을 받습니다"""
     
     async def generate_stream() -> AsyncGenerator[str, None]:
-        """Generate streaming response following linear principle."""
         try:
-            # Send initial chunk
-            initial_chunk = StreamChunk(
-                type="start",
-                content={
-                    "message": "Starting analysis...",
-                    "thread_id": request.thread_id or str(uuid.uuid4()),
-                }
-            )
-            yield f"data: {initial_chunk.json()}\n\n"
+            # 세션 ID 생성 (없는 경우)
+            session_id = request.session_id or str(uuid.uuid4())
             
-            # Stream agent execution
-            async for chunk in agent_service.stream_question(
-                question=request.question,
-                thread_id=request.thread_id,
-            ):
-                if chunk["success"]:
-                    # Process different types of chunks
-                    chunk_data = chunk["data"]
+            # 에이전트 그래프 가져오기
+            agent_graph = get_sql_agent_graph()
+            
+            # 세션 설정 생성
+            config = await create_session_config(session_id)
+            
+            # 시작 메시지
+            start_chunk = StreamChunk(
+                type="message",
+                content="질문을 분석하고 있습니다..."
+            )
+            yield f"data: {start_chunk.model_dump_json()}\n\n"
+            
+            # 스트리밍 실행
+            async for chunk in agent_graph.stream_query(request.question, config):
+                # 각 노드 실행 결과를 스트리밍
+                for node_name, node_result in chunk.items():
+                    if node_name == "generate_response":
+                        # 최종 응답인 경우
+                        messages = node_result.get("messages", [])
+                        if messages:
+                            last_msg = messages[-1]
+                            if hasattr(last_msg, 'content'):
+                                response_chunk = StreamChunk(
+                                    type="message",
+                                    content=str(last_msg.content)
+                                )
+                                yield f"data: {response_chunk.model_dump_json()}\n\n"
                     
-                    # Determine chunk type based on content
-                    if isinstance(chunk_data, dict):
-                        # Check if it's a node execution
-                        if "agent" in chunk_data:
-                            stream_chunk = StreamChunk(
-                                type="agent",
-                                content={
-                                    "node": "agent",
-                                    "data": chunk_data["agent"],
-                                }
-                            )
-                        elif "tools" in chunk_data:
-                            stream_chunk = StreamChunk(
-                                type="tool",
-                                content={
-                                    "node": "tools", 
-                                    "data": chunk_data["tools"],
-                                }
-                            )
-                        else:
-                            stream_chunk = StreamChunk(
-                                type="update",
-                                content=chunk_data,
-                            )
-                        
-                        yield f"data: {stream_chunk.json()}\n\n"
-                else:
-                    # Error chunk
-                    error_chunk = StreamChunk(
-                        type="error",
-                        content={"error": chunk["error"]},
-                    )
-                    yield f"data: {error_chunk.json()}\n\n"
+                    elif node_name == "execute_tools":
+                        # 도구 실행 결과인 경우
+                        sql_results = node_result.get("sql_results", [])
+                        if sql_results:
+                            for sql_result in sql_results:
+                                sql_chunk = StreamChunk(
+                                    type="sql_result",
+                                    content=sql_result
+                                )
+                                yield f"data: {sql_chunk.model_dump_json()}\n\n"
+                    
+                    # 에러 처리
+                    if node_result.get("error_message"):
+                        error_chunk = StreamChunk(
+                            type="error",
+                            content=node_result["error_message"]
+                        )
+                        yield f"data: {error_chunk.model_dump_json()}\n\n"
+                        return
             
-            # Send final chunk
-            final_chunk = StreamChunk(
-                type="final",
-                content={"message": "Analysis complete"},
+            # 완료 메시지
+            complete_chunk = StreamChunk(
+                type="complete",
+                content="처리가 완료되었습니다."
             )
-            yield f"data: {final_chunk.json()}\n\n"
+            yield f"data: {complete_chunk.model_dump_json()}\n\n"
             
         except Exception as e:
+            logger.error(f"스트리밍 처리 중 오류: {str(e)}")
             error_chunk = StreamChunk(
                 type="error",
-                content={"error": str(e)},
+                content=f"오류가 발생했습니다: {str(e)}"
             )
-            yield f"data: {error_chunk.json()}\n\n"
-    
-    return EventSourceResponse(generate_stream())
-
-
-@router.post("/stream-json")
-async def stream_question_json(
-    request: QuestionRequest,
-    agent_service: AgentService = Depends(get_agent_service),
-):
-    """Stream agent response as JSON lines for faster first token."""
-    
-    async def generate_json_stream() -> AsyncGenerator[bytes, None]:
-        """Generate JSON streaming response for fast first token."""
-        try:
-            # Send immediate first token
-            first_token = {
-                "type": "start",
-                "content": {
-                    "message": "🔍 Analyzing your question...",
-                    "thread_id": request.thread_id or str(uuid.uuid4()),
-                    "question": request.question,
-                },
-                "timestamp": StreamChunk().timestamp.isoformat(),
-            }
-            yield (json.dumps(first_token) + "\n").encode()
-            
-            # Stream agent execution with detailed progress
-            step_count = 0
-            async for chunk in agent_service.stream_question(
-                question=request.question,
-                thread_id=request.thread_id,
-            ):
-                step_count += 1
-                
-                if chunk["success"]:
-                    chunk_data = chunk["data"]
-                    
-                    # Enhanced chunk processing for better UX
-                    if isinstance(chunk_data, dict):
-                        # Agent reasoning step
-                        if "agent" in chunk_data:
-                            agent_data = chunk_data["agent"]
-                            if "messages" in agent_data:
-                                messages = agent_data["messages"]
-                                if messages:
-                                    last_message = messages[-1]
-                                    
-                                    # Check if it's a tool call
-                                    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                                        for tool_call in last_message.tool_calls:
-                                            tool_chunk = {
-                                                "type": "tool_call",
-                                                "content": {
-                                                    "step": step_count,
-                                                    "tool_name": tool_call["name"],
-                                                    "tool_args": tool_call["args"],
-                                                    "message": f"🔧 Executing {tool_call['name']}...",
-                                                },
-                                                "timestamp": StreamChunk().timestamp.isoformat(),
-                                            }
-                                            yield (json.dumps(tool_chunk) + "\n").encode()
-                                    else:
-                                        # Regular agent response
-                                        response_chunk = {
-                                            "type": "agent_response",
-                                            "content": {
-                                                "step": step_count,
-                                                "response": last_message.content,
-                                                "message": "💭 Agent thinking...",
-                                            },
-                                            "timestamp": StreamChunk().timestamp.isoformat(),
-                                        }
-                                        yield (json.dumps(response_chunk) + "\n").encode()
-                        
-                        # Tool execution result
-                        elif "tools" in chunk_data:
-                            tool_result = {
-                                "type": "tool_result",
-                                "content": {
-                                    "step": step_count,
-                                    "result": chunk_data["tools"],
-                                    "message": "✅ Tool execution completed",
-                                },
-                                "timestamp": StreamChunk().timestamp.isoformat(),
-                            }
-                            yield (json.dumps(tool_result) + "\n").encode()
-                        
-                        # General update
-                        else:
-                            update_chunk = {
-                                "type": "update",
-                                "content": {
-                                    "step": step_count,
-                                    "data": chunk_data,
-                                },
-                                "timestamp": StreamChunk().timestamp.isoformat(),
-                            }
-                            yield (json.dumps(update_chunk) + "\n").encode()
-                else:
-                    # Error during execution
-                    error_chunk = {
-                        "type": "error",
-                        "content": {
-                            "step": step_count,
-                            "error": chunk["error"],
-                            "message": "❌ Error occurred",
-                        },
-                        "timestamp": StreamChunk().timestamp.isoformat(),
-                    }
-                    yield (json.dumps(error_chunk) + "\n").encode()
-            
-            # Send completion
-            final_chunk = {
-                "type": "complete",
-                "content": {
-                    "message": "🎉 Analysis complete!",
-                    "total_steps": step_count,
-                },
-                "timestamp": StreamChunk().timestamp.isoformat(),
-            }
-            yield (json.dumps(final_chunk) + "\n").encode()
-            
-        except Exception as e:
-            error_chunk = {
-                "type": "error",
-                "content": {
-                    "error": str(e),
-                    "message": "❌ Unexpected error occurred",
-                },
-                "timestamp": StreamChunk().timestamp.isoformat(),
-            }
-            yield (json.dumps(error_chunk) + "\n").encode()
+            yield f"data: {error_chunk.model_dump_json()}\n\n"
     
     return StreamingResponse(
-        generate_json_stream(),
-        media_type="application/x-ndjson",
+        generate_stream(),
+        media_type="text/plain",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Content-Type": "text/event-stream",
         }
     )

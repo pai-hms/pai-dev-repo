@@ -1,8 +1,3 @@
-# Environment variables
-.env
-.env.local
-.env.production
-
 # Python
 __pycache__/
 *.py[cod]
@@ -21,34 +16,47 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual environments
-.venv/
+.env
+.venv
+env/
 venv/
 ENV/
-env/
-
-# UV
-.uv/
-uv.lock
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Logs
+# Project specific
 logs/
 *.log
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Database
 *.db
-*.sqlite
+*.sqlite3
+
+# Docker
+.dockerignore

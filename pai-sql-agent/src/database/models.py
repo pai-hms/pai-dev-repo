@@ -1,253 +1,212 @@
-"""Database models for Pohang City budget data."""
-
+"""
+데이터베이스 모델 정의
+데이터와 로직의 일체화 원칙에 따라 데이터 구조와 관련 로직을 함께 정의
+"""
 from datetime import datetime
-from typing import Optional
-
-from sqlalchemy import Column, DateTime, Integer, String, Text, Numeric, ForeignKey
+from typing import Optional, Dict, Any
+from sqlalchemy import (
+    Column, String, Integer, Float, DateTime, Text, BigInteger, 
+    Boolean, JSON, ForeignKey, Index
+)
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
-from .connection import Base
-
-
-class BudgetCategory(Base):
-    """Budget category model."""
-    
-    __tablename__ = "budget_categories"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(20), unique=True, index=True, nullable=False)
-    name = Column(String(200), nullable=False)
-    parent_code = Column(String(20), ForeignKey("budget_categories.code"), nullable=True)
-    level = Column(Integer, nullable=False, default=1)
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Self-referential relationship
-    parent = relationship("BudgetCategory", remote_side=[code], backref="children")
-    
-    # Relationship to budget items
-    budget_items = relationship("BudgetItem", back_populates="category")
+Base = declarative_base()
 
 
-class BudgetItem(Base):
-    """Budget item model for 2023 Pohang City budget data."""
-    
-    __tablename__ = "budget_items"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    category_code = Column(String(20), ForeignKey("budget_categories.code"), nullable=False)
-    item_name = Column(String(500), nullable=False)
-    budget_amount = Column(Numeric(15, 2), nullable=False)
-    executed_amount = Column(Numeric(15, 2), nullable=True)
-    execution_rate = Column(Numeric(5, 2), nullable=True)  # Percentage
-    department = Column(String(100), nullable=True)
-    sub_department = Column(String(100), nullable=True)
-    project_code = Column(String(50), nullable=True)
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationship to category
-    category = relationship("BudgetCategory", back_populates="budget_items")
+class TimestampMixin:
+    """타임스탬프 믹스인 (생성/수정 시간 자동 관리)"""
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
 
-class PopulationData(Base):
-    """Population census data model."""
+class PopulationStats(Base, TimestampMixin):
+    """인구 통계 데이터"""
+    __tablename__ = "population_stats"
     
-    __tablename__ = "population_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    total_population = Column(Integer, nullable=False)
-    male_population = Column(Integer, nullable=True)
-    female_population = Column(Integer, nullable=True)
-    household_count = Column(Integer, nullable=True)
-    age_group_0_9 = Column(Integer, nullable=True)
-    age_group_10_19 = Column(Integer, nullable=True)
-    age_group_20_29 = Column(Integer, nullable=True)
-    age_group_30_39 = Column(Integer, nullable=True)
-    age_group_40_49 = Column(Integer, nullable=True)
-    age_group_50_59 = Column(Integer, nullable=True)
-    age_group_60_69 = Column(Integer, nullable=True)
-    age_group_70_plus = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 인구 관련 지표
+    tot_ppltn = Column(BigInteger, nullable=True, comment="총인구")
+    avg_age = Column(Float, nullable=True, comment="평균나이(세)")
+    ppltn_dnsty = Column(Float, nullable=True, comment="인구밀도(명/㎢)")
+    aged_child_idx = Column(Float, nullable=True, comment="노령화지수(일백명당 명)")
+    oldage_suprt_per = Column(Float, nullable=True, comment="노년부양비(일백명당 명)")
+    juv_suprt_per = Column(Float, nullable=True, comment="유년부양비(일백명당 명)")
+    
+    # 성별 인구
+    male_ppltn = Column(BigInteger, nullable=True, comment="남자인구")
+    female_ppltn = Column(BigInteger, nullable=True, comment="여자인구")
+    
+    # 연령대별 인구 (추가 컬럼들)
+    age_0_14 = Column(BigInteger, nullable=True, comment="0-14세 인구")
+    age_15_64 = Column(BigInteger, nullable=True, comment="15-64세 인구")
+    age_65_over = Column(BigInteger, nullable=True, comment="65세 이상 인구")
+    
+    __table_args__ = (
+        Index("idx_population_year_adm", "year", "adm_cd"),
+        Index("idx_population_adm_nm", "adm_nm"),
+    )
 
 
-class HouseholdData(Base):
-    """Household census data model."""
+class HouseholdStats(Base, TimestampMixin):
+    """가구 통계 데이터"""
+    __tablename__ = "household_stats"
     
-    __tablename__ = "household_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    total_households = Column(Integer, nullable=False)
-    ordinary_households = Column(Integer, nullable=True)
-    collective_households = Column(Integer, nullable=True)
-    single_person_households = Column(Integer, nullable=True)
-    multi_person_households = Column(Integer, nullable=True)
-    average_household_size = Column(Numeric(4, 2), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 가구 관련 지표
+    household_cnt = Column(BigInteger, nullable=True, comment="가구수")
+    avg_household_size = Column(Float, nullable=True, comment="평균 가구원수")
+    
+    # 가구 유형별
+    one_person_household = Column(BigInteger, nullable=True, comment="1인 가구수")
+    elderly_household = Column(BigInteger, nullable=True, comment="고령자 가구수")
+    
+    __table_args__ = (
+        Index("idx_household_year_adm", "year", "adm_cd"),
+    )
 
 
-class HousingData(Base):
-    """Housing census data model."""
+class HouseStats(Base, TimestampMixin):
+    """주택 통계 데이터"""
+    __tablename__ = "house_stats"
     
-    __tablename__ = "housing_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    total_houses = Column(Integer, nullable=False)
-    detached_houses = Column(Integer, nullable=True)
-    apartment_houses = Column(Integer, nullable=True)
-    row_houses = Column(Integer, nullable=True)
-    multi_unit_houses = Column(Integer, nullable=True)
-    other_houses = Column(Integer, nullable=True)
-    owned_houses = Column(Integer, nullable=True)
-    rented_houses = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 주택 관련 지표
+    house_cnt = Column(BigInteger, nullable=True, comment="주택수")
+    
+    # 주택 유형별
+    apartment_cnt = Column(BigInteger, nullable=True, comment="아파트수")
+    detached_house_cnt = Column(BigInteger, nullable=True, comment="단독주택수")
+    row_house_cnt = Column(BigInteger, nullable=True, comment="연립주택수")
+    
+    __table_args__ = (
+        Index("idx_house_year_adm", "year", "adm_cd"),
+    )
 
 
-class CompanyData(Base):
-    """Company/Business census data model."""
+class CompanyStats(Base, TimestampMixin):
+    """사업체 통계 데이터"""
+    __tablename__ = "company_stats"
     
-    __tablename__ = "company_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    total_companies = Column(Integer, nullable=False)
-    total_employees = Column(Integer, nullable=True)
-    manufacturing_companies = Column(Integer, nullable=True)
-    service_companies = Column(Integer, nullable=True)
-    retail_companies = Column(Integer, nullable=True)
-    construction_companies = Column(Integer, nullable=True)
-    other_companies = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 사업체 관련 지표
+    company_cnt = Column(BigInteger, nullable=True, comment="사업체수")
+    employee_cnt = Column(BigInteger, nullable=True, comment="종사자수")
+    
+    __table_args__ = (
+        Index("idx_company_year_adm", "year", "adm_cd"),
+    )
 
 
-class IndustryData(Base):
-    """Industry classification data model."""
+class FarmHouseholdStats(Base, TimestampMixin):
+    """농가 통계 데이터"""
+    __tablename__ = "farm_household_stats"
     
-    __tablename__ = "industry_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    industry_code = Column(String(10), nullable=False, index=True)
-    industry_name = Column(String(200), nullable=False)
-    company_count = Column(Integer, nullable=False)
-    employee_count = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 농가 관련 지표
+    farm_cnt = Column(BigInteger, nullable=True, comment="농가수(가구)")
+    population = Column(BigInteger, nullable=True, comment="농가인구수(명)")
+    avg_population = Column(Float, nullable=True, comment="농가 평균 인구수(명)")
+    
+    __table_args__ = (
+        Index("idx_farm_year_adm", "year", "adm_cd"),
+    )
 
 
-class AgriculturalHouseholdData(Base):
-    """Agricultural household data model."""
+class ForestryHouseholdStats(Base, TimestampMixin):
+    """임가 통계 데이터"""
+    __tablename__ = "forestry_household_stats"
     
-    __tablename__ = "agricultural_household_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    total_farm_households = Column(Integer, nullable=False)
-    full_time_farmers = Column(Integer, nullable=True)
-    part_time_farmers = Column(Integer, nullable=True)
-    farm_population = Column(Integer, nullable=True)
-    cultivated_area = Column(Numeric(12, 2), nullable=True)  # in hectares
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 임가 관련 지표
+    forestry_cnt = Column(BigInteger, nullable=True, comment="임가수(가구)")
+    population = Column(BigInteger, nullable=True, comment="임가인구수(명)")
+    avg_population = Column(Float, nullable=True, comment="임가 평균 인구수(명)")
+    
+    __table_args__ = (
+        Index("idx_forestry_year_adm", "year", "adm_cd"),
+    )
 
 
-class ForestryHouseholdData(Base):
-    """Forestry household data model."""
+class FisheryHouseholdStats(Base, TimestampMixin):
+    """어가 통계 데이터"""
+    __tablename__ = "fishery_household_stats"
     
-    __tablename__ = "forestry_household_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
+    oga_div = Column(Integer, nullable=False, comment="어가구분(0:전체, 1:내수면, 2:해수면)")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    total_forestry_households = Column(Integer, nullable=False)
-    forestry_population = Column(Integer, nullable=True)
-    forest_area = Column(Numeric(12, 2), nullable=True)  # in hectares
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 어가 관련 지표
+    fishery_cnt = Column(BigInteger, nullable=True, comment="어가수(가구)")
+    population = Column(BigInteger, nullable=True, comment="어가인구수(명)")
+    avg_population = Column(Float, nullable=True, comment="어가 평균 인구수(명)")
+    
+    __table_args__ = (
+        Index("idx_fishery_year_adm_div", "year", "adm_cd", "oga_div"),
+    )
 
 
-class FisheryHouseholdData(Base):
-    """Fishery household data model."""
+class HouseholdMemberStats(Base, TimestampMixin):
+    """가구원 통계 데이터"""
+    __tablename__ = "household_member_stats"
     
-    __tablename__ = "fishery_household_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
+    data_type = Column(Integer, nullable=False, comment="가구타입(1:농가, 2:임가, 3:해수면어가, 4:내수면어가)")
+    gender = Column(Integer, nullable=True, comment="성별(0:총합, 1:남자, 2:여자)")
+    age_from = Column(Integer, nullable=True, comment="나이(from)")
+    age_to = Column(Integer, nullable=True, comment="나이(to)")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    total_fishery_households = Column(Integer, nullable=False)
-    fishery_population = Column(Integer, nullable=True)
-    fishing_boats = Column(Integer, nullable=True)
-    aquaculture_farms = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 가구원 관련 지표
+    population = Column(BigInteger, nullable=True, comment="가구원수(명)")
+    
+    __table_args__ = (
+        Index("idx_member_year_adm_type", "year", "adm_cd", "data_type"),
+    )
 
 
-class HouseholdMemberData(Base):
-    """Household member demographic data model."""
+class CrawlLog(Base, TimestampMixin):
+    """크롤링 로그"""
+    __tablename__ = "crawl_logs"
     
-    __tablename__ = "household_member_data"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    api_endpoint = Column(String(255), nullable=False, comment="API 엔드포인트")
+    year = Column(Integer, nullable=True, comment="요청 연도")
+    adm_cd = Column(String(20), nullable=True, comment="행정구역코드")
+    status = Column(String(50), nullable=False, comment="크롤링 상태")
+    error_message = Column(Text, nullable=True, comment="에러 메시지")
+    response_count = Column(Integer, nullable=True, comment="응답 데이터 개수")
     
-    id = Column(Integer, primary_key=True, index=True)
-    year = Column(Integer, nullable=False, index=True)
-    region_code = Column(String(20), nullable=False, index=True)
-    region_name = Column(String(100), nullable=False)
-    household_type = Column(String(50), nullable=False)  # e.g., 'single', 'couple', 'family'
-    member_count = Column(Integer, nullable=False)
-    male_members = Column(Integer, nullable=True)
-    female_members = Column(Integer, nullable=True)
-    children_count = Column(Integer, nullable=True)
-    elderly_count = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class QueryHistory(Base):
-    """Query execution history for agent learning."""
-    
-    __tablename__ = "query_history"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_question = Column(Text, nullable=False)
-    generated_sql = Column(Text, nullable=False)
-    execution_result = Column(Text, nullable=True)
-    success = Column(Integer, nullable=False, default=1)  # 1 for success, 0 for failure
-    error_message = Column(Text, nullable=True)
-    execution_time_ms = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-class AgentCheckpoint(Base):
-    """Agent state checkpoints for persistence."""
-    
-    __tablename__ = "agent_checkpoints"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    thread_id = Column(String(100), nullable=False, index=True)
-    checkpoint_id = Column(String(100), nullable=False)
-    state_data = Column(Text, nullable=False)  # JSON serialized state
-    metadata = Column(Text, nullable=True)  # JSON serialized metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        Index("idx_crawl_endpoint_status", "api_endpoint", "status"),
+        Index("idx_crawl_created_at", "created_at"),
+    )

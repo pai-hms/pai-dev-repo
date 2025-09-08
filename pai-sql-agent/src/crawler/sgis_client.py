@@ -1,614 +1,369 @@
-"""SGIS API client for census data crawling."""
-
+"""
+SGIS API 클라이언트
+데이터와 로직의 일체화 원칙에 따라 SGIS API 관련 데이터와 로직을 함께 관리
+"""
 import asyncio
 import hashlib
+import hmac
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
+from dataclasses import dataclass
+from enum import Enum
 
 import httpx
-from pydantic import BaseModel
-
-from src.config import settings
+from src.config.settings import get_settings
 
 
-class SGISAuthResponse(BaseModel):
-    """SGIS authentication response model."""
-    result: Dict[str, Any]
-    errMsg: Optional[str] = None
-    errCd: Optional[int] = None
+class SGISDataType(Enum):
+    """SGIS 데이터 타입"""
+    POPULATION = "population"
+    HOUSEHOLD = "household"
+    HOUSE = "house"
+    COMPANY = "company"
+    INDUSTRY_CODE = "industrycode"
+    FARM_HOUSEHOLD = "farmhousehold"
+    FORESTRY_HOUSEHOLD = "forestryhousehold"
+    FISHERY_HOUSEHOLD = "fisheryhousehold"
+    HOUSEHOLD_MEMBER = "householdmember"
 
 
-class SGISDataResponse(BaseModel):
-    """SGIS data response model."""
+@dataclass
+class SGISResponse:
+    """SGIS API 응답 데이터"""
+    id: str
     result: List[Dict[str, Any]]
-    errMsg: Optional[str] = None
-    errCd: Optional[int] = None
+    err_msg: str
+    err_cd: int
+    tr_id: str
+    
+    @property
+    def is_success(self) -> bool:
+        """응답 성공 여부"""
+        return self.err_cd == 0
+    
+    @property
+    def error_message(self) -> Optional[str]:
+        """에러 메시지 반환"""
+        return self.err_msg if not self.is_success else None
 
 
 class SGISClient:
-    """SGIS API client following KISS principle and data sovereignty."""
+    """SGIS API 클라이언트"""
     
-    BASE_URL = "https://sgis.kostat.go.kr/OpenAPI3"
-    
-    def __init__(self):
-        self.api_key = settings.sgis_api_key
-        self.secret_key = settings.sgis_secret_key
-        self.access_token: Optional[str] = None
-        self.token_expires_at: Optional[datetime] = None
-        self._client: Optional[httpx.AsyncClient] = None
-    
-    async def __aenter__(self):
-        """Async context manager entry."""
-        self._client = httpx.AsyncClient(timeout=30.0)
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
-    
-    def _generate_timestamp(self) -> str:
-        """Generate timestamp for API authentication."""
-        return str(int(time.time() * 1000))
-    
-    def _generate_signature(self, timestamp: str) -> str:
-        """Generate signature for API authentication."""
-        message = f"{self.api_key}{self.secret_key}{timestamp}"
-        return hashlib.md5(message.encode()).hexdigest()
-    
-    async def _authenticate(self) -> str:
-        """Authenticate with SGIS API and get access token."""
-        if not self.api_key or not self.secret_key:
-            raise ValueError("SGIS API key and secret key are required")
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self.base_url = self.settings.sgis_base_url
+        self.access_key = self.settings.sgis_access_key
+        self.secret_key = self.settings.sgis_secret_key
+        self._access_token: Optional[str] = None
+        self._token_expires_at: Optional[datetime] = None
         
-        # Check if token is still valid
-        if (self.access_token and self.token_expires_at and 
-            datetime.now() < self.token_expires_at):
-            return self.access_token
+        # API 엔드포인트 매핑
+        self.endpoints = {
+            SGISDataType.POPULATION: "/stats/population.json",
+            SGISDataType.HOUSEHOLD: "/stats/household.json",
+            SGISDataType.HOUSE: "/stats/house.json",
+            SGISDataType.COMPANY: "/stats/company.json",
+            SGISDataType.INDUSTRY_CODE: "/stats/industrycode.json",
+            SGISDataType.FARM_HOUSEHOLD: "/stats/farmhousehold.json",
+            SGISDataType.FORESTRY_HOUSEHOLD: "/stats/forestryhousehold.json",
+            SGISDataType.FISHERY_HOUSEHOLD: "/stats/fisheryhousehold.json",
+            SGISDataType.HOUSEHOLD_MEMBER: "/stats/householdmember.json",
+        }
+    
+    async def _get_access_token(self) -> str:
+        """액세스 토큰 획득"""
+        # 토큰이 유효한지 확인
+        if (self._access_token and 
+            self._token_expires_at and 
+            datetime.now() < self._token_expires_at):
+            return self._access_token
         
-        timestamp = self._generate_timestamp()
-        signature = self._generate_signature(timestamp)
+        # 새 토큰 요청
+        timestamp = str(int(time.time() * 1000))
         
-        auth_url = f"{self.BASE_URL}/auth/authentication.json"
-        params = {
-            "consumer_key": self.api_key,
+        # HMAC-SHA256 서명 생성
+        message = f"{self.access_key}{timestamp}"
+        signature = hmac.new(
+            self.secret_key.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        auth_url = f"{self.base_url}/auth/authentication.json"
+        auth_data = {
+            "consumer_key": self.access_key,
             "consumer_secret": self.secret_key,
             "timestamp": timestamp,
-            "signature": signature,
+            "signature": signature
         }
         
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+        async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
+            response = await client.post(auth_url, data=auth_data)
+            response.raise_for_status()
+            
+            auth_result = response.json()
+            if auth_result.get("errCd") != 0:
+                raise ValueError(f"인증 실패: {auth_result.get('errMsg')}")
+            
+            self._access_token = auth_result["result"]["accessToken"]
+            # 토큰 만료 시간을 1시간으로 설정 (여유를 두고 55분)
+            self._token_expires_at = datetime.now().replace(
+                minute=datetime.now().minute + 55
+            )
+            
+            return self._access_token
+    
+    async def _make_request(
+        self,
+        endpoint: str,
+        params: Dict[str, Union[str, int]]
+    ) -> SGISResponse:
+        """API 요청 실행"""
+        access_token = await self._get_access_token()
         
-        response = await self._client.get(auth_url, params=params)
-        response.raise_for_status()
+        request_data = {
+            "accessToken": access_token,
+            **params
+        }
         
-        auth_data = SGISAuthResponse(**response.json())
+        url = f"{self.base_url}{endpoint}"
         
-        if auth_data.errCd:
-            raise Exception(f"SGIS Auth Error: {auth_data.errMsg}")
+        for attempt in range(self.settings.max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
+                    response = await client.post(url, data=request_data)
+                    response.raise_for_status()
+                    
+                    result = response.json()
+                    return SGISResponse(
+                        id=result.get("id", ""),
+                        result=result.get("result", []),
+                        err_msg=result.get("errMsg", ""),
+                        err_cd=result.get("errCd", -1),
+                        tr_id=result.get("trId", "")
+                    )
+                    
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                if attempt == self.settings.max_retries - 1:
+                    raise ValueError(f"API 요청 실패: {str(e)}")
+                
+                # 재시도 전 대기
+                await asyncio.sleep(2 ** attempt)
         
-        self.access_token = auth_data.result.get("accessToken")
-        # Token expires in 1 hour, set expiry to 50 minutes for safety
-        self.token_expires_at = datetime.now().replace(
-            minute=datetime.now().minute + 50
+        raise ValueError("최대 재시도 횟수 초과")
+    
+    async def get_population_stats(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 1
+    ) -> SGISResponse:
+        """인구 통계 조회"""
+        params = {
+            "year": year,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.POPULATION],
+            params
         )
-        
-        return self.access_token
     
-    async def get_population_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"  # Pohang city code
-    ) -> List[Dict[str, Any]]:
-        """Get population census data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        pop_url = f"{self.BASE_URL}/stats/population.json"
+    async def get_household_stats(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 1
+    ) -> SGISResponse:
+        """가구 통계 조회"""
         params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
+            "year": year,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.HOUSEHOLD],
+            params
+        )
+    
+    async def get_house_stats(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 1
+    ) -> SGISResponse:
+        """주택 통계 조회"""
+        params = {
+            "year": year,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.HOUSE],
+            params
+        )
+    
+    async def get_company_stats(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 1
+    ) -> SGISResponse:
+        """사업체 통계 조회"""
+        params = {
+            "year": year,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.COMPANY],
+            params
+        )
+    
+    async def get_farm_household_stats(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 0
+    ) -> SGISResponse:
+        """농가 통계 조회"""
+        params = {
+            "year": year,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.FARM_HOUSEHOLD],
+            params
+        )
+    
+    async def get_forestry_household_stats(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 0
+    ) -> SGISResponse:
+        """임가 통계 조회"""
+        params = {
+            "year": year,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.FORESTRY_HOUSEHOLD],
+            params
+        )
+    
+    async def get_fishery_household_stats(
+        self,
+        year: int,
+        oga_div: int = 0,
+        adm_cd: Optional[str] = None,
+        low_search: int = 0
+    ) -> SGISResponse:
+        """어가 통계 조회"""
+        params = {
+            "year": year,
+            "oga_div": oga_div,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.FISHERY_HOUSEHOLD],
+            params
+        )
+    
+    async def get_household_member_stats(
+        self,
+        year: int,
+        data_type: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 0,
+        gender: Optional[int] = None,
+        age_from: Optional[int] = None,
+        age_to: Optional[int] = None
+    ) -> SGISResponse:
+        """가구원 통계 조회"""
+        params = {
+            "year": year,
+            "data_type": data_type,
+            "low_search": low_search
         }
         
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        if gender is not None:
+            params["gender"] = gender
+        if age_from is not None:
+            params["age_from"] = age_from
+        if age_to is not None:
+            params["age_to"] = age_to
         
-        response = await self._client.get(pop_url, params=params)
-        response.raise_for_status()
-        
-        pop_data = SGISDataResponse(**response.json())
-        
-        if pop_data.errCd:
-            raise Exception(f"SGIS Data Error: {pop_data.errMsg}")
-        
-        return pop_data.result
+        return await self._make_request(
+            self.endpoints[SGISDataType.HOUSEHOLD_MEMBER],
+            params
+        )
     
-    async def search_population_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130",
-        search_type: str = "1"  # 1: 행정구역별, 2: 격자별
-    ) -> List[Dict[str, Any]]:
-        """Search population data with various criteria."""
-        access_token = await self._authenticate()
+    async def get_all_administrative_divisions(self) -> List[Dict[str, str]]:
+        """모든 행정구역 코드 조회"""
+        # 시도 목록 조회
+        sido_response = await self.get_population_stats(year=2023, low_search=1)
         
-        search_url = f"{self.BASE_URL}/stats/searchpopulation.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-            "search_type": search_type,
-        }
+        if not sido_response.is_success:
+            raise ValueError(f"시도 목록 조회 실패: {sido_response.error_message}")
         
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+        all_divisions = []
         
-        response = await self._client.get(search_url, params=params)
-        response.raise_for_status()
-        
-        search_data = SGISDataResponse(**response.json())
-        
-        if search_data.errCd:
-            raise Exception(f"SGIS Data Error: {search_data.errMsg}")
-        
-        return search_data.result
-    
-    async def get_household_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"
-    ) -> List[Dict[str, Any]]:
-        """Get household census data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        household_url = f"{self.BASE_URL}/stats/household.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(household_url, params=params)
-        response.raise_for_status()
-        
-        household_data = SGISDataResponse(**response.json())
-        
-        if household_data.errCd:
-            raise Exception(f"SGIS Data Error: {household_data.errMsg}")
-        
-        return household_data.result
-    
-    async def get_housing_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"
-    ) -> List[Dict[str, Any]]:
-        """Get housing census data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        house_url = f"{self.BASE_URL}/stats/house.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(house_url, params=params)
-        response.raise_for_status()
-        
-        house_data = SGISDataResponse(**response.json())
-        
-        if house_data.errCd:
-            raise Exception(f"SGIS Data Error: {house_data.errMsg}")
-        
-        return house_data.result
-    
-    async def get_company_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"
-    ) -> List[Dict[str, Any]]:
-        """Get company/business census data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        company_url = f"{self.BASE_URL}/stats/company.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(company_url, params=params)
-        response.raise_for_status()
-        
-        company_data = SGISDataResponse(**response.json())
-        
-        if company_data.errCd:
-            raise Exception(f"SGIS Data Error: {company_data.errMsg}")
-        
-        return company_data.result
-    
-    async def get_industry_code_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130",
-        industry_cd: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """Get industry classification data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        industry_url = f"{self.BASE_URL}/stats/industrycode.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if industry_cd:
-            params["industry_cd"] = industry_cd
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(industry_url, params=params)
-        response.raise_for_status()
-        
-        industry_data = SGISDataResponse(**response.json())
-        
-        if industry_data.errCd:
-            raise Exception(f"SGIS Data Error: {industry_data.errMsg}")
-        
-        return industry_data.result
-    
-    async def get_farm_household_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"
-    ) -> List[Dict[str, Any]]:
-        """Get agricultural household data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        farm_url = f"{self.BASE_URL}/stats/farmhousehold.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(farm_url, params=params)
-        response.raise_for_status()
-        
-        farm_data = SGISDataResponse(**response.json())
-        
-        if farm_data.errCd:
-            raise Exception(f"SGIS Data Error: {farm_data.errMsg}")
-        
-        return farm_data.result
-    
-    async def get_forestry_household_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"
-    ) -> List[Dict[str, Any]]:
-        """Get forestry household data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        forestry_url = f"{self.BASE_URL}/stats/forestryhousehold.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(forestry_url, params=params)
-        response.raise_for_status()
-        
-        forestry_data = SGISDataResponse(**response.json())
-        
-        if forestry_data.errCd:
-            raise Exception(f"SGIS Data Error: {forestry_data.errMsg}")
-        
-        return forestry_data.result
-    
-    async def get_fishery_household_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"
-    ) -> List[Dict[str, Any]]:
-        """Get fishery household data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        fishery_url = f"{self.BASE_URL}/stats/fisheryhousehold.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(fishery_url, params=params)
-        response.raise_for_status()
-        
-        fishery_data = SGISDataResponse(**response.json())
-        
-        if fishery_data.errCd:
-            raise Exception(f"SGIS Data Error: {fishery_data.errMsg}")
-        
-        return fishery_data.result
-    
-    async def get_household_member_data(
-        self, 
-        year: int = 2023, 
-        area_cd: str = "47130"
-    ) -> List[Dict[str, Any]]:
-        """Get household member data from SGIS API."""
-        access_token = await self._authenticate()
-        
-        member_url = f"{self.BASE_URL}/stats/householdmember.json"
-        params = {
-            "accessToken": access_token,
-            "year": str(year),
-            "area_cd": area_cd,
-        }
-        
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use async context manager.")
-        
-        response = await self._client.get(member_url, params=params)
-        response.raise_for_status()
-        
-        member_data = SGISDataResponse(**response.json())
-        
-        if member_data.errCd:
-            raise Exception(f"SGIS Data Error: {member_data.errMsg}")
-        
-        return member_data.result
-
-
-class DataCrawler:
-    """Data crawler for comprehensive SGIS census data with data sovereignty principle."""
-    
-    def __init__(self):
-        self.sgis_client = SGISClient()
-    
-    async def crawl_comprehensive_census_data(self, year: int = 2023) -> Dict[str, List[Dict[str, Any]]]:
-        """Crawl all available census data for Pohang city."""
-        async with self.sgis_client as client:
-            # Crawl all types of census data concurrently for maximum efficiency
-            tasks = {
-                "population": client.get_population_data(year),
-                "population_search": client.search_population_data(year),
-                "household": client.get_household_data(year),
-                "housing": client.get_housing_data(year),
-                "company": client.get_company_data(year),
-                "industry": client.get_industry_code_data(year),
-                "agriculture": client.get_farm_household_data(year),
-                "forestry": client.get_forestry_household_data(year),
-                "fishery": client.get_fishery_household_data(year),
-                "household_members": client.get_household_member_data(year),
-            }
+        for sido in sido_response.result:
+            sido_cd = sido.get("adm_cd")
+            if not sido_cd or len(sido_cd) != 2:
+                continue
             
-            # Execute all tasks concurrently
-            results = {}
-            for key, task in tasks.items():
-                try:
-                    results[key] = await task
-                except Exception as e:
-                    print(f"⚠️  Failed to crawl {key} data: {e}")
-                    results[key] = []
+            all_divisions.append({
+                "adm_cd": sido_cd,
+                "adm_nm": sido.get("adm_nm", ""),
+                "level": "sido"
+            })
             
-            return results
-    
-    async def crawl_pohang_census_data(self, year: int = 2023) -> Dict[str, List[Dict[str, Any]]]:
-        """Backward compatibility method - crawl basic census data."""
-        return await self.crawl_comprehensive_census_data(year)
-    
-    def transform_population_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS population data to database format."""
-        transformed_data = []
+            # 시군구 목록 조회
+            try:
+                sigungu_response = await self.get_population_stats(
+                    year=2023, 
+                    adm_cd=sido_cd, 
+                    low_search=1
+                )
+                
+                if sigungu_response.is_success:
+                    for sigungu in sigungu_response.result:
+                        sigungu_cd = sigungu.get("adm_cd")
+                        if sigungu_cd and len(sigungu_cd) == 5:
+                            all_divisions.append({
+                                "adm_cd": sigungu_cd,
+                                "adm_nm": sigungu.get("adm_nm", ""),
+                                "level": "sigungu"
+                            })
+                
+                # API 호출 간격 조정
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                print(f"시군구 조회 실패 (시도: {sido_cd}): {str(e)}")
+                continue
         
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "total_population": int(item.get("tot_ppltn", 0)),
-                "male_population": int(item.get("male_ppltn", 0)),
-                "female_population": int(item.get("fmle_ppltn", 0)),
-                "household_count": int(item.get("household", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_household_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS household data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "total_households": int(item.get("tot_hshld", 0)),
-                "ordinary_households": int(item.get("ord_hshld", 0)),
-                "collective_households": int(item.get("col_hshld", 0)),
-                "single_person_households": int(item.get("sgl_hshld", 0)),
-                "multi_person_households": int(item.get("mlt_hshld", 0)),
-                "average_household_size": float(item.get("avg_hshld_sz", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_housing_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS housing data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "total_houses": int(item.get("tot_house", 0)),
-                "detached_houses": int(item.get("detached", 0)),
-                "apartment_houses": int(item.get("apartment", 0)),
-                "row_houses": int(item.get("row_house", 0)),
-                "multi_unit_houses": int(item.get("multi_unit", 0)),
-                "other_houses": int(item.get("other", 0)),
-                "owned_houses": int(item.get("owned", 0)),
-                "rented_houses": int(item.get("rented", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_company_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS company data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "total_companies": int(item.get("tot_company", 0)),
-                "total_employees": int(item.get("tot_employee", 0)),
-                "manufacturing_companies": int(item.get("manufacturing", 0)),
-                "service_companies": int(item.get("service", 0)),
-                "retail_companies": int(item.get("retail", 0)),
-                "construction_companies": int(item.get("construction", 0)),
-                "other_companies": int(item.get("other", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_industry_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS industry data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "industry_code": item.get("industry_cd"),
-                "industry_name": item.get("industry_nm"),
-                "company_count": int(item.get("company_cnt", 0)),
-                "employee_count": int(item.get("employee_cnt", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_agricultural_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS agricultural household data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "total_farm_households": int(item.get("tot_farm_hshld", 0)),
-                "full_time_farmers": int(item.get("full_time", 0)),
-                "part_time_farmers": int(item.get("part_time", 0)),
-                "farm_population": int(item.get("farm_pop", 0)),
-                "cultivated_area": float(item.get("cult_area", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_forestry_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS forestry household data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "total_forestry_households": int(item.get("tot_forestry_hshld", 0)),
-                "forestry_population": int(item.get("forestry_pop", 0)),
-                "forest_area": float(item.get("forest_area", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_fishery_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS fishery household data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "total_fishery_households": int(item.get("tot_fishery_hshld", 0)),
-                "fishery_population": int(item.get("fishery_pop", 0)),
-                "fishing_boats": int(item.get("fishing_boats", 0)),
-                "aquaculture_farms": int(item.get("aqua_farms", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
-    
-    def transform_household_member_data(
-        self, raw_data: List[Dict[str, Any]], year: int
-    ) -> List[Dict[str, Any]]:
-        """Transform raw SGIS household member data to database format."""
-        transformed_data = []
-        
-        for item in raw_data:
-            transformed_item = {
-                "year": year,
-                "region_code": item.get("adm_cd"),
-                "region_name": item.get("adm_nm"),
-                "household_type": item.get("hshld_type", "unknown"),
-                "member_count": int(item.get("member_cnt", 0)),
-                "male_members": int(item.get("male_member", 0)),
-                "female_members": int(item.get("female_member", 0)),
-                "children_count": int(item.get("children", 0)),
-                "elderly_count": int(item.get("elderly", 0)),
-            }
-            transformed_data.append(transformed_item)
-        
-        return transformed_data
+        return all_divisions

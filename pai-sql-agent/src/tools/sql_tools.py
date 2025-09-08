@@ -1,217 +1,286 @@
-"""에이전트용 SQL 실행 도구."""
+"""
+SQL 도구 유틸리티
+SQL 관련 공통 기능 제공
+"""
+from typing import List, Dict, Any, Optional, Tuple
+import re
+import json
+from datetime import datetime
 
-import time
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
-
-from langchain.tools import BaseTool
-from langchain.callbacks.manager import CallbackManagerForToolUse
-
-from src.database.repository import SQLExecutor
-
-
-class SQLQueryInput(BaseModel):
-    """SQL 쿼리 도구 입력 스키마."""
-    query: str = Field(description="실행할 SQL 쿼리")
+from src.database.repository import SQLQueryValidator
 
 
-class SQLQueryTool(BaseTool):
-    """데이터 주권 원칙을 따르는 SQL 쿼리 실행 도구."""
+class SQLResultFormatter:
+    """SQL 결과 포맷터"""
     
-    name: str = "execute_sql_query"
-    description: str = """
-    지방자치단체 예산 및 센서스 데이터베이스에 대해 SQL 쿼리를 실행합니다.
-    
-    사용 가능한 테이블:
-    - budget_categories: 예산 분류 계층구조 (code, name, parent_code, level)
-    - budget_items: 지방자치단체 예산 항목 (year, category_code, item_name, budget_amount, executed_amount, execution_rate, department)
-    - population_data: 센서스 인구 데이터 (year, region_code, region_name, total_population, male_population, female_population, household_count, 연령대별)
-    - household_data: 가구 통계 (total_households, single_person_households, average_household_size 등)
-    - housing_data: 주택 통계 (total_houses, detached_houses, apartment_houses, owned_houses 등)
-    - company_data: 사업체 통계 (total_companies, total_employees, manufacturing_companies 등)
-    - industry_data: 산업분류별 통계 (industry_code, industry_name, company_count, employee_count)
-    - agricultural_household_data: 농업 가구 데이터
-    - forestry_household_data: 임업 가구 데이터
-    - fishery_household_data: 어업 가구 데이터
-    - query_history: 학습용 이전 쿼리 실행 이력
-    
-    이 도구 사용법:
-    1. 분류, 부서, 금액별 예산 데이터 조회
-    2. 인구통계 분석
-    3. 1인당 분석을 위한 예산과 인구 데이터 조인
-    4. 예산 집행률 및 트렌드 계산
-    5. 교차 부문 분석 (예산-인구-경제-주거)
-    6. 지역별 비교 분석
-    
-    항상 올바른 SQL 구문을 사용하고 데이터 타입에 주의하세요.
-    """
-    args_schema = SQLQueryInput
-    
-    def __init__(self):
-        super().__init__()
-        self.sql_executor = SQLExecutor()
-    
-    def _run(
-        self,
-        query: str,
-        run_manager: Optional[CallbackManagerForToolUse] = None,
-    ) -> str:
-        """SQL 쿼리 동기 실행 (권장하지 않음)."""
-        raise NotImplementedError("비동기 버전을 사용하세요")
-    
-    async def _arun(
-        self,
-        query: str,
-        run_manager: Optional[CallbackManagerForToolUse] = None,
-    ) -> str:
-        """SQL 쿼리 비동기 실행."""
-        start_time = time.time()
-        
-        try:
-            # SQL 쿼리 실행
-            results = await self.sql_executor.execute_sql_query(query)
-            execution_time = int((time.time() - start_time) * 1000)
-            
-            # 에이전트용 결과 포맷
-            if not results:
-                return "쿼리가 성공적으로 실행되었지만 결과가 없습니다."
-            
-            # 에이전트 과부하 방지를 위한 결과 제한
-            if len(results) > 100:
-                limited_results = results[:100]
-                result_text = self._format_results(limited_results)
-                result_text += f"\n\n(총 {len(results)}개 결과 중 처음 100개 표시)"
-            else:
-                result_text = self._format_results(results)
-            
-            result_text += f"\n\n실행 시간: {execution_time}ms"
-            return result_text
-            
-        except Exception as e:
-            error_msg = f"SQL 실행 오류: {str(e)}"
-            if run_manager:
-                run_manager.on_tool_error(error_msg)
-            return error_msg
-    
-    def _format_results(self, results: List[Dict[str, Any]]) -> str:
-        """에이전트 사용을 위한 쿼리 결과 포맷."""
+    @staticmethod
+    def format_as_table(results: List[Dict[str, Any]], max_rows: int = 50) -> str:
+        """결과를 테이블 형태로 포맷팅"""
         if not results:
-            return "결과를 찾을 수 없습니다."
+            return "결과가 없습니다."
         
-        # 첫 번째 결과에서 컬럼명 가져오기
-        columns = list(results[0].keys())
+        # 컬럼 헤더
+        headers = list(results[0].keys())
         
-        # 포맷된 테이블 생성
-        formatted_lines = []
+        # 컬럼 너비 계산
+        col_widths = {}
+        for header in headers:
+            col_widths[header] = len(str(header))
+            for row in results[:max_rows]:
+                value_len = len(str(row.get(header, "")))
+                col_widths[header] = max(col_widths[header], value_len)
         
-        # 헤더
-        header = " | ".join(columns)
-        formatted_lines.append(header)
-        formatted_lines.append("-" * len(header))
+        # 테이블 생성
+        lines = []
         
-        # 데이터 행
-        for row in results:
-            row_values = []
-            for col in columns:
-                value = row.get(col)
-                if value is None:
-                    row_values.append("NULL")
-                else:
-                    row_values.append(str(value))
-            formatted_lines.append(" | ".join(row_values))
+        # 헤더 라인
+        header_parts = []
+        separator_parts = []
+        for header in headers:
+            width = min(col_widths[header], 20)  # 최대 너비 제한
+            header_parts.append(f"{header:<{width}}")
+            separator_parts.append("-" * width)
         
-        return "\n".join(formatted_lines)
-
-
-class SchemaInfoInput(BaseModel):
-    """스키마 정보 도구 입력 스키마."""
-    table_name: Optional[str] = Field(
-        default=None, 
-        description="스키마를 가져올 특정 테이블명, 또는 모든 테이블의 경우 None"
-    )
-
-
-class SchemaInfoTool(BaseTool):
-    """데이터베이스 스키마 정보 조회 도구."""
-    
-    name: str = "get_schema_info"
-    description: str = """
-    테이블의 데이터베이스 스키마 정보를 가져옵니다.
-    
-    이 도구 사용법:
-    1. 쿼리 작성 전 테이블 구조 이해
-    2. 컬럼명, 데이터 타입, 제약조건 확인
-    3. 데이터베이스의 사용 가능한 테이블 탐색
-    
-    특정 테이블 스키마의 경우 table_name 매개변수 제공, 모든 테이블의 경우 비워두세요.
-    """
-    args_schema = SchemaInfoInput
-    
-    def __init__(self):
-        super().__init__()
-        self.sql_executor = SQLExecutor()
-    
-    def _run(
-        self,
-        table_name: Optional[str] = None,
-        run_manager: Optional[CallbackManagerForToolUse] = None,
-    ) -> str:
-        """Get schema info synchronously (not recommended)."""
-        raise NotImplementedError("Use async version instead")
-    
-    async def _arun(
-        self,
-        table_name: Optional[str] = None,
-        run_manager: Optional[CallbackManagerForToolUse] = None,
-    ) -> str:
-        """Get schema info asynchronously."""
-        try:
-            if table_name:
-                # Get schema for specific table
-                schema_info = await self.sql_executor.get_table_schema(table_name)
-                return self._format_table_schema(table_name, schema_info)
-            else:
-                # Get schema for all tables
-                all_schemas = await self.sql_executor.get_all_table_schemas()
-                formatted_schemas = []
-                
-                for table, schema in all_schemas.items():
-                    formatted_schemas.append(self._format_table_schema(table, schema))
-                
-                return "\n\n".join(formatted_schemas)
-                
-        except Exception as e:
-            error_msg = f"Schema info error: {str(e)}"
-            if run_manager:
-                run_manager.on_tool_error(error_msg)
-            return error_msg
-    
-    def _format_table_schema(self, table_name: str, schema_info: List[Dict[str, Any]]) -> str:
-        """Format table schema information."""
-        if not schema_info:
-            return f"Table '{table_name}' not found or has no columns."
+        lines.append(" | ".join(header_parts))
+        lines.append(" | ".join(separator_parts))
         
-        lines = [f"Table: {table_name}"]
-        lines.append("=" * (len(table_name) + 7))
+        # 데이터 라인들
+        for i, row in enumerate(results[:max_rows]):
+            row_parts = []
+            for header in headers:
+                value = str(row.get(header, ""))
+                width = min(col_widths[header], 20)
+                # 너무 긴 값은 자르기
+                if len(value) > width:
+                    value = value[:width-3] + "..."
+                row_parts.append(f"{value:<{width}}")
+            lines.append(" | ".join(row_parts))
         
-        for column in schema_info:
-            col_name = column.get('column_name', 'unknown')
-            data_type = column.get('data_type', 'unknown')
-            is_nullable = column.get('is_nullable', 'unknown')
-            default_val = column.get('column_default')
-            max_length = column.get('character_maximum_length')
-            
-            col_info = f"  {col_name}: {data_type}"
-            
-            if max_length:
-                col_info += f"({max_length})"
-            
-            if is_nullable == 'NO':
-                col_info += " NOT NULL"
-            
-            if default_val:
-                col_info += f" DEFAULT {default_val}"
-            
-            lines.append(col_info)
+        # 더 많은 결과가 있는 경우
+        if len(results) > max_rows:
+            lines.append(f"... ({len(results) - max_rows}개 행 더 있음)")
         
         return "\n".join(lines)
+    
+    @staticmethod
+    def format_as_json(results: List[Dict[str, Any]], pretty: bool = True) -> str:
+        """결과를 JSON 형태로 포맷팅"""
+        if pretty:
+            return json.dumps(results, ensure_ascii=False, indent=2, default=str)
+        else:
+            return json.dumps(results, ensure_ascii=False, default=str)
+    
+    @staticmethod
+    def format_as_csv(results: List[Dict[str, Any]]) -> str:
+        """결과를 CSV 형태로 포맷팅"""
+        if not results:
+            return ""
+        
+        import csv
+        import io
+        
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=results[0].keys())
+        writer.writeheader()
+        writer.writerows(results)
+        
+        return output.getvalue()
+
+
+class SQLAnalyzer:
+    """SQL 쿼리 분석기"""
+    
+    @staticmethod
+    def extract_table_names(query: str) -> List[str]:
+        """쿼리에서 테이블 이름 추출"""
+        # FROM 절의 테이블들
+        from_pattern = r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+        from_tables = re.findall(from_pattern, query.upper())
+        
+        # JOIN 절의 테이블들
+        join_pattern = r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+        join_tables = re.findall(join_pattern, query.upper())
+        
+        # 중복 제거 후 반환
+        all_tables = set(from_tables + join_tables)
+        return [table.lower() for table in all_tables]
+    
+    @staticmethod
+    def extract_columns(query: str) -> List[str]:
+        """쿼리에서 컬럼 이름 추출 (간단한 버전)"""
+        # SELECT와 FROM 사이의 컬럼들 추출
+        select_pattern = r'SELECT\s+(.*?)\s+FROM'
+        match = re.search(select_pattern, query.upper(), re.DOTALL)
+        
+        if not match:
+            return []
+        
+        columns_str = match.group(1)
+        
+        # 간단한 컬럼 파싱 (복잡한 쿼리는 완벽하지 않음)
+        columns = []
+        for col in columns_str.split(','):
+            col = col.strip()
+            # AS 키워드 처리
+            if ' AS ' in col.upper():
+                col = col.split(' AS ')[-1].strip()
+            # 함수나 연산 제거하고 컬럼명만 추출
+            if '.' in col:
+                col = col.split('.')[-1]
+            
+            columns.append(col.strip())
+        
+        return columns
+    
+    @staticmethod
+    def get_query_type(query: str) -> str:
+        """쿼리 타입 확인"""
+        query_upper = query.strip().upper()
+        
+        if query_upper.startswith('SELECT'):
+            return 'SELECT'
+        elif query_upper.startswith('INSERT'):
+            return 'INSERT'
+        elif query_upper.startswith('UPDATE'):
+            return 'UPDATE'
+        elif query_upper.startswith('DELETE'):
+            return 'DELETE'
+        elif query_upper.startswith('CREATE'):
+            return 'CREATE'
+        elif query_upper.startswith('DROP'):
+            return 'DROP'
+        elif query_upper.startswith('ALTER'):
+            return 'ALTER'
+        else:
+            return 'UNKNOWN'
+    
+    @staticmethod
+    def estimate_complexity(query: str) -> str:
+        """쿼리 복잡도 추정"""
+        query_upper = query.upper()
+        
+        complexity_score = 0
+        
+        # JOIN 개수
+        join_count = len(re.findall(r'\bJOIN\b', query_upper))
+        complexity_score += join_count * 2
+        
+        # 서브쿼리 개수  
+        subquery_count = query.count('(') - query.count(')')
+        if subquery_count > 0:
+            complexity_score += subquery_count * 3
+        
+        # 집계 함수 개수
+        agg_functions = ['COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'GROUP BY']
+        for func in agg_functions:
+            if func in query_upper:
+                complexity_score += 1
+        
+        # HAVING, ORDER BY, LIMIT 등
+        advanced_clauses = ['HAVING', 'ORDER BY', 'LIMIT', 'OFFSET', 'UNION', 'INTERSECT', 'EXCEPT']
+        for clause in advanced_clauses:
+            if clause in query_upper:
+                complexity_score += 1
+        
+        if complexity_score <= 2:
+            return 'SIMPLE'
+        elif complexity_score <= 5:
+            return 'MEDIUM'
+        else:
+            return 'COMPLEX'
+
+
+class QueryBuilder:
+    """쿼리 빌더 헬퍼"""
+    
+    @staticmethod
+    def build_population_query(
+        year: int,
+        adm_cd: Optional[str] = None,
+        adm_nm_like: Optional[str] = None,
+        columns: Optional[List[str]] = None,
+        limit: Optional[int] = None
+    ) -> str:
+        """인구 통계 쿼리 빌더"""
+        
+        # 기본 컬럼
+        if not columns:
+            columns = ['adm_cd', 'adm_nm', 'tot_ppltn', 'avg_age', 'ppltn_dnsty']
+        
+        query_parts = [
+            f"SELECT {', '.join(columns)}",
+            "FROM population_stats",
+            f"WHERE year = {year}"
+        ]
+        
+        if adm_cd:
+            query_parts.append(f"AND adm_cd = '{adm_cd}'")
+        
+        if adm_nm_like:
+            query_parts.append(f"AND adm_nm ILIKE '%{adm_nm_like}%'")
+        
+        query_parts.append("ORDER BY adm_cd")
+        
+        if limit:
+            query_parts.append(f"LIMIT {limit}")
+        
+        return "\n".join(query_parts)
+    
+    @staticmethod
+    def build_comparison_query(
+        table: str,
+        years: List[int],
+        metric: str,
+        adm_cd: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> str:
+        """연도별 비교 쿼리 빌더"""
+        
+        query_parts = [
+            f"SELECT adm_cd, adm_nm, year, {metric}",
+            f"FROM {table}",
+            f"WHERE year IN ({', '.join(map(str, years))})"
+        ]
+        
+        if adm_cd:
+            query_parts.append(f"AND adm_cd = '{adm_cd}'")
+        
+        query_parts.append("ORDER BY adm_cd, year")
+        
+        if limit:
+            query_parts.append(f"LIMIT {limit}")
+        
+        return "\n".join(query_parts)
+    
+    @staticmethod
+    def build_ranking_query(
+        table: str,
+        year: int,
+        metric: str,
+        order: str = 'DESC',
+        adm_level: Optional[str] = None,
+        limit: int = 10
+    ) -> str:
+        """랭킹 쿼리 빌더"""
+        
+        query_parts = [
+            f"SELECT adm_cd, adm_nm, {metric}",
+            f"FROM {table}",
+            f"WHERE year = {year}",
+            f"AND {metric} IS NOT NULL"
+        ]
+        
+        # 행정구역 레벨 필터
+        if adm_level == 'sido':
+            query_parts.append("AND LENGTH(adm_cd) = 2")
+        elif adm_level == 'sigungu':
+            query_parts.append("AND LENGTH(adm_cd) = 5")
+        elif adm_level == 'emd':
+            query_parts.append("AND LENGTH(adm_cd) = 8")
+        
+        query_parts.extend([
+            f"ORDER BY {metric} {order.upper()}",
+            f"LIMIT {limit}"
+        ])
+        
+        return "\n".join(query_parts)
