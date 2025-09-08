@@ -21,9 +21,10 @@ async def lifespan(app: FastAPI):
     logger.info("애플리케이션 시작")
     
     try:
-        # 데이터베이스 연결 테스트
+        # 데이터베이스 연결 및 테이블 생성
         db_manager = get_database_manager()
-        logger.info("데이터베이스 연결 완료")
+        await db_manager.create_tables()  # Alembic 대신 직접 테이블 생성
+        logger.info("데이터베이스 테이블 생성 완료")
         
         yield
         

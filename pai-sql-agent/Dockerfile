@@ -20,7 +20,7 @@ ENV POETRY_NO_INTERACTION=1 \
 # pyproject.toml 복사
 COPY pyproject.toml ./
 
-# 의존성 설치
+# 의존성 설치 (Alembic 제외)
 RUN poetry install --only=main --no-root && rm -rf $POETRY_CACHE_DIR
 
 # 소스 코드 복사
@@ -28,5 +28,5 @@ COPY . .
 
 EXPOSE 8000
 
-# Poetry 가상환경을 직접 활성화하고 실행
-CMD ["sh", "-c", ". /app/.venv/bin/activate && uvicorn webapp.main:app --host 0.0.0.0 --port 8000"]
+# Poetry run 명령어로 직접 실행 (가상환경 자동 활성화)
+CMD ["poetry", "run", "uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000"]
