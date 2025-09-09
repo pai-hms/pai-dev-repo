@@ -444,6 +444,7 @@ class DataInitializer:
         async with self.db_manager.get_async_session() as session:
             db_service = DatabaseService(session)
             
+            
             # 임가통계는 2005년부터 제공
             forestry_years = [year for year in self.farm_years if year >= 2005]
             
@@ -567,12 +568,23 @@ class DataInitializer:
                         )
                         
                         if response.is_success:
-                            await db_service.crawl_log.log_success(
-                                api_endpoint=f"/stats/householdmember.json (type={data_type})",
-                                year=year,
-                                response_count=len(response.result)
-                            )
-                            logger.info(f"가구원통계 {year}년 타입{data_type}: {len(response.result)}개 레코드")
+                            data_list = []
+                            
+                            for item in response.result:
+                                data = self._convert_household_member_data(item, year, data_type)
+                                if data:
+                                    data_list.append(data)
+                            
+                            if data_list:
+                                await db_service.household_member.upsert_batch(data_list)
+                                await db_service.crawl_log.log_success(
+                                    api_endpoint=f"/stats/householdmember.json (type={data_type})",
+                                    year=year,
+                                    response_count=len(data_list)
+                                )
+                                logger.info(f"가구원통계 {year}년 타입{data_type}: {len(data_list)}개 레코드 처리")
+                            else:
+                                logger.warning(f"가구원통계 {year}년 타입{data_type}: 변환 가능한 데이터 없음")
                     
                         await asyncio.sleep(0.3)
                     
@@ -795,6 +807,33 @@ class DataInitializer:
             }
         except Exception as e:
             logger.error(f"어가 데이터 변환 실패: {str(e)}, 데이터: {item}")
+            return None
+
+    def _convert_household_member_data(self, item: Dict[str, Any], year: int, data_type: int) -> Optional[Dict[str, Any]]:
+        """
+        가구원통계 데이터 변환 (householdmember.json)
+        
+        API 응답 필드:
+        - adm_cd: 행정구역코드
+        - adm_nm: 행정구역명
+        - gender: 성별
+        - age_from: 나이(from)
+        - age_to: 나이(to)
+        - population: 가구원수(명)
+        """
+        try:
+            return {
+                "year": year,
+                "adm_cd": item.get("adm_cd"),
+                "adm_nm": item.get("adm_nm"),
+                "data_type": data_type,
+                "gender": self._safe_int(item.get("gender")),
+                "age_from": self._safe_int(item.get("age_from")),
+                "age_to": self._safe_int(item.get("age_to")),
+                "population": self._safe_int(item.get("population")),
+            }
+        except Exception as e:
+            logger.error(f"가구원 데이터 변환 실패: {str(e)}, 데이터: {item}")
             return None
 
     # ==========================================

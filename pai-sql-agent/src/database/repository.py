@@ -96,9 +96,9 @@ class BaseRepository:
             # 어가통계는 oga_div도 포함
             if hasattr(self.model, 'oga_div'):
                 conflict_columns = ['year', 'adm_cd', 'oga_div']
-            # 가구원통계는 data_type도 포함
-            elif hasattr(self.model, 'data_type'):
-                conflict_columns = ['year', 'adm_cd', 'data_type']
+            # 가구원통계는 모든 unique constraint 필드 포함
+            elif hasattr(self.model, 'data_type') and hasattr(self.model, 'gender') and hasattr(self.model, 'age_from'):
+                conflict_columns = ['year', 'adm_cd', 'data_type', 'gender', 'age_from', 'age_to']
             else:
                 conflict_columns = ['year', 'adm_cd']
             
