@@ -122,10 +122,8 @@ class SQLAgentNodes:
                 
                 # 도구 실행
                 try:
-                    if hasattr(tool, 'ainvoke'):
-                        result = await tool.ainvoke(tool_args)
-                    else:
-                        result = await tool.invoke(tool_args)
+                    # LangChain 도구는 항상 ainvoke 사용
+                    result = await tool.ainvoke(tool_args)
                     
                     # SQL 결과인 경우 별도 저장
                     if tool_name == "execute_sql_query":

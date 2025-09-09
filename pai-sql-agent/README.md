@@ -22,6 +22,11 @@ docker-compose up --build
 # 백그라운드 실행
 docker-compose up -d --build
 
+# 완전 재빌드
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+
 # 종료 후 재실행
 docker-compose down
 docker-compose  up

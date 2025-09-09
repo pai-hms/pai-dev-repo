@@ -22,9 +22,12 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - SGIS_SERVICE_ID=${SGIS_SERVICE_KEY:-}  # 수정
-      - SGIS_SECURITY_KEY=${SGIS_SECURIT_KEY:-}  # 수정
+      - SGIS_SERVICE_ID=${SGIS_SERVICE_ID:-}
+      - SGIS_SECURITY_KEY=${SGIS_SECURITY_KEY:-}
       - LOG_LEVEL=INFO
+    volumes:
+      - ./src:/app/src
+      - ./webapp:/app/webapp
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,9 +40,12 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - SGIS_SERVICE_ID=${SGIS_SERVICE_KEY:-}  # 수정
-      - SGIS_SECURITY_KEY=${SGIS_SECURIT_KEY:-}  # 수정
+      - SGIS_SERVICE_ID=${SGIS_SERVICE_ID:-}
+      - SGIS_SECURITY_KEY=${SGIS_SECURITY_KEY:-}
       - LOG_LEVEL=INFO
+    volumes:
+      - ./src:/app/src
+      - ./webapp:/app/webapp
     depends_on:
       - app
     ports: ["8501:8501"]

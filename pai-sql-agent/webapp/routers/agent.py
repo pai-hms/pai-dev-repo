@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage
 
 from webapp.models import QueryRequest, QueryResponse, StreamChunk
-from src.agent.graph import get_sql_agent_graph, create_session_config
+from src.agent.graph import get_sql_agent_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -23,14 +23,11 @@ async def query_sql_agent(request: QueryRequest) -> QueryResponse:
         # 세션 ID 생성 (없는 경우)
         session_id = request.session_id or str(uuid.uuid4())
         
-        # 에이전트 그래프 가져오기
-        agent_graph = get_sql_agent_graph()
-        
-        # 세션 설정 생성
-        config = await create_session_config(session_id)
+        # 에이전트 서비스 가져오기
+        agent_service = get_sql_agent_service(enable_checkpointer=True)
         
         # 쿼리 실행
-        result = await agent_graph.invoke_query(request.question, config)
+        result = await agent_service.invoke_query(request.question, session_id)
         
         # 결과 파싱
         processing_time = time.time() - start_time
@@ -85,11 +82,8 @@ async def stream_sql_agent(request: QueryRequest):
             # 세션 ID 생성 (없는 경우)
             session_id = request.session_id or str(uuid.uuid4())
             
-            # 에이전트 그래프 가져오기
-            agent_graph = get_sql_agent_graph()
-            
-            # 세션 설정 생성
-            config = await create_session_config(session_id)
+            # 에이전트 서비스 가져오기
+            agent_service = get_sql_agent_service(enable_checkpointer=True)
             
             # 시작 메시지
             start_chunk = StreamChunk(
@@ -99,7 +93,7 @@ async def stream_sql_agent(request: QueryRequest):
             yield f"data: {start_chunk.model_dump_json()}\n\n"
             
             # 스트리밍 실행
-            async for chunk in agent_graph.stream_query(request.question, config):
+            async for chunk in agent_service.stream_query(request.question, session_id):
                 # 각 노드 실행 결과를 스트리밍
                 for node_name, node_result in chunk.items():
                     if node_name == "generate_response":
