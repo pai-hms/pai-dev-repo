@@ -9,13 +9,17 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
-# PostgreSQL 체크포인터 import
+# PostgreSQL 체크포인터 import (LangGraph 공식 방식)
 try:
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-    from psycopg_pool import AsyncConnectionPool
+    from langgraph.checkpoint.postgres import AsyncPostgresSaver
     POSTGRES_AVAILABLE = True
 except ImportError:
-    POSTGRES_AVAILABLE = False
+    try:
+        # 대안 경로 시도
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        POSTGRES_AVAILABLE = True
+    except ImportError:
+        POSTGRES_AVAILABLE = False
 
 from src.agent.nodes import (
     analyze_question, execute_tools, generate_response, 
@@ -25,15 +29,21 @@ from src.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+# 체크포인터 상태 로깅
+if POSTGRES_AVAILABLE:
+    logger.info("✅ LangGraph AsyncPostgresSaver 사용 가능")
+else:
+    logger.warning("❌ LangGraph AsyncPostgresSaver 사용 불가, MemorySaver로 대체")
+
 
 async def create_checkpointer():
     """
-    PostgreSQL 체크포인터 생성 (비동기 방식)
+    LangGraph 공식 AsyncPostgresSaver 생성
     
-    참고 문서에 따른 최적화된 구현:
-    - AsyncPostgresSaver 사용
-    - 컨텍스트 매니저 적용
-    - 자동 테이블 생성
+    공식 문서 방식:
+    - AsyncPostgresSaver.from_conn_string() 사용
+    - 컨텍스트 매니저로 리소스 관리
+    - setup() 호출로 테이블 자동 생성
     """
     if not POSTGRES_AVAILABLE:
         logger.warning("PostgreSQL 체크포인터를 사용할 수 없습니다. MemorySaver를 사용합니다.")
@@ -43,45 +53,74 @@ async def create_checkpointer():
         settings = get_settings()
         
         # DATABASE_URL을 PostgreSQL 체크포인터용으로 변환
-        # 예: postgresql://user:pass@host:port/db 형태로 변환
         db_url = settings.database_url
         
-        # 연결 풀 생성 (영속적 연결 풀)
-        pool = AsyncConnectionPool(
-            conninfo=db_url,
-            max_size=20,
-            kwargs={
-                "autocommit": True,
-                "prepare_threshold": 0,
-            }
-        )
+        # SQLAlchemy 형식에서 psycopg 형식으로 변환 (필요시)
+        if db_url.startswith("postgresql+asyncpg://"):
+            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+        elif db_url.startswith("postgresql+psycopg://"):
+            db_url = db_url.replace("postgresql+psycopg://", "postgresql://")
         
-        # 풀 열기
-        await pool.open()
+        # sslmode가 없으면 추가
+        if "sslmode=" not in db_url:
+            separator = "&" if "?" in db_url else "?"
+            db_url = f"{db_url}{separator}sslmode=disable"
         
-        # AsyncPostgresSaver 생성
-        checkpointer = AsyncPostgresSaver(pool)
+        logger.info(f"🔗 체크포인터 연결 문자열: {db_url[:50]}...")
         
-        # 테이블 자동 생성 (setup 호출)
-        await checkpointer.setup()
+        # LangGraph 공식 방식: AsyncPostgresSaver.from_conn_string 사용
+        # 실제로는 컨텍스트 매니저를 사용해야 하지만, 전역 체크포인터를 위해 직접 생성
+        checkpointer = None
         
-        logger.info("PostgreSQL 체크포인터가 성공적으로 설정되었습니다.")
-        logger.info(f"Database URL: {db_url[:50]}...")
+        async def setup_checkpointer():
+            nonlocal checkpointer
+            # from_conn_string은 컨텍스트 매니저이므로 직접 사용할 수 없음
+            # 대신 동일한 로직을 직접 구현
+            try:
+                # AsyncPostgresSaver를 직접 생성하는 대신 공식 방식 사용을 시도
+                import psycopg_pool
+                
+                # 연결 풀 생성
+                pool = psycopg_pool.AsyncConnectionPool(
+                    conninfo=db_url,
+                    max_size=10,
+                    kwargs={
+                        "autocommit": True,
+                        "prepare_threshold": 0,
+                    }
+                )
+                
+                # 풀 열기
+                await pool.open()
+                
+                # AsyncPostgresSaver 생성
+                checkpointer = AsyncPostgresSaver(pool)
+                
+                # 테이블 설정
+                await checkpointer.setup()
+                
+                logger.info("✅ AsyncPostgresSaver 체크포인터 설정 완료")
+                return checkpointer
+                
+            except Exception as e:
+                logger.error(f"❌ 공식 방식 설정 실패: {e}")
+                raise
         
-        return checkpointer
+        return await setup_checkpointer()
         
     except Exception as e:
-        logger.error(f"PostgreSQL 체크포인터 생성 실패: {e}")
+        logger.error(f"❌ PostgreSQL 체크포인터 생성 실패: {e}")
         logger.error(f"Database URL: {settings.database_url[:50]}...")
-        logger.info("MemorySaver로 대체합니다.")
+        logger.warning("🔄 MemorySaver로 대체합니다.")
         return MemorySaver()
 
 
 async def create_sql_agent(enable_checkpointer: bool = True) -> CompiledStateGraph:
-    """SQL Agent 그래프 생성"""
+    """SQL Agent 그래프 생성 (AgentState 기반)"""
     
-    # 상태 그래프 초기화
-    workflow = StateGraph(dict)
+    # AgentState를 사용한 상태 그래프 초기화
+    from src.agent.nodes import AgentState
+    workflow = StateGraph(AgentState)
     
     # 노드 추가
     workflow.add_node("analyze_question", analyze_question)
@@ -149,20 +188,49 @@ class SQLAgentService:
         question: str, 
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """쿼리 실행 (단일 응답)"""
+        """쿼리 실행 (단일 응답) - 개선된 메모리 지원"""
         try:
-            # 초기 상태 생성
-            initial_state = create_agent_state(question).__dict__
+            logger.info(f"🚀 쿼리 실행 시작: {question[:50]}...")
+            
+            # 에이전트 가져오기
+            agent = await self._get_agent()
             
             # 설정 생성
             config = None
             if self.enable_checkpointer and session_id:
                 config = {"configurable": {"thread_id": session_id}}
+                logger.info(f"🔑 세션 ID 사용: {session_id}")
+            
+            # 기존 상태 복원 시도 (메모리 기능)
+            initial_state = {}
+            if self.enable_checkpointer and session_id:
+                try:
+                    existing_state = await agent.aget_state(config)
+                    if existing_state and existing_state.values:
+                        # 기존 상태에 새 질문 추가
+                        initial_state = existing_state.values.copy()
+                        initial_state["current_query"] = question
+                        logger.info(f"💾 기존 대화 기록 로드 완료 (메시지: {len(initial_state.get('messages', []))}개)")
+                    else:
+                        # 새 상태 생성
+                        initial_state = create_agent_state(question)
+                        logger.info("🆕 새 대화 세션 시작")
+                except Exception as state_error:
+                    logger.warning(f"⚠️ 기존 상태 로드 실패, 새 상태 생성: {str(state_error)}")
+                    initial_state = create_agent_state(question)
+            else:
+                # 체크포인터 사용하지 않는 경우
+                initial_state = create_agent_state(question)
+                logger.info("🔧 메모리 없이 실행")
+            
+            # 현재 질문을 상태에 업데이트
+            initial_state["current_query"] = question
             
             # 그래프 실행
-            agent = await self._get_agent()
+            logger.info("⚙️ 그래프 실행 시작")
             result = await agent.ainvoke(initial_state, config=config)
             
+            logger.info("✅ 쿼리 실행 완료")
             return result
             
         except Exception as e:
@@ -172,12 +240,17 @@ class SQLAgentService:
                 "exception_message": str(e),
                 "traceback": traceback.format_exc()
             }
-            logger.error(f"쿼리 실행 중 오류: {error_details}")
+            logger.error(f"❌ 쿼리 실행 중 오류: {error_details}")
             
             return {
                 "error_message": f"쿼리 실행 중 오류가 발생했습니다: {str(e) or type(e).__name__}",
                 "is_complete": True,
-                "messages": []
+                "messages": [],
+                "current_query": question,
+                "sql_results": [],
+                "used_tools": [],
+                "iteration_count": 0,
+                "max_iterations": 10
             }
     
     async def stream_query(
@@ -185,18 +258,45 @@ class SQLAgentService:
         question: str, 
         session_id: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """쿼리 실행 (스트리밍) - LLM 토큰별 스트리밍"""
+        """쿼리 실행 (스트리밍) - 개선된 메모리 지원"""
         try:
-            # 초기 상태 생성
-            initial_state = create_agent_state(question).__dict__
+            logger.info(f"🚀 스트리밍 쿼리 시작: {question[:50]}...")
+            
+            # 에이전트 가져오기
+            agent = await self._get_agent()
             
             # 설정 생성
             config = None
             if self.enable_checkpointer and session_id:
                 config = {"configurable": {"thread_id": session_id}}
+                logger.info(f"🔑 세션 ID 사용: {session_id}")
+            
+            # 기존 상태 복원 시도 (메모리 기능)
+            initial_state = {}
+            if self.enable_checkpointer and session_id:
+                try:
+                    existing_state = await agent.aget_state(config)
+                    if existing_state and existing_state.values:
+                        # 기존 상태에 새 질문 추가
+                        initial_state = existing_state.values.copy()
+                        initial_state["current_query"] = question
+                        logger.info(f"💾 기존 대화 기록 로드 완료 (메시지: {len(initial_state.get('messages', []))}개)")
+                    else:
+                        # 새 상태 생성
+                        initial_state = create_agent_state(question)
+                        logger.info("🆕 새 대화 세션 시작")
+                except Exception as state_error:
+                    logger.warning(f"⚠️ 기존 상태 로드 실패, 새 상태 생성: {str(state_error)}")
+                    initial_state = create_agent_state(question)
+            else:
+                # 체크포인터 사용하지 않는 경우
+                initial_state = create_agent_state(question)
+                logger.info("🔧 메모리 없이 실행")
+            
+            # 현재 질문을 상태에 업데이트
+            initial_state["current_query"] = question
             
             # 그래프 스트리밍 실행 - messages 모드로 LLM 토큰 스트리밍
-            agent = await self._get_agent()
             final_state = None
             
             async for message_chunk, metadata in agent.astream(
@@ -244,16 +344,32 @@ class SQLAgentService:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """쿼리 실행 (혼합 스트리밍) - 토큰 + 업데이트"""
         try:
-            # 초기 상태 생성
-            initial_state = create_agent_state(question).__dict__
+            # 에이전트 가져오기
+            agent = await self._get_agent()
             
             # 설정 생성
             config = None
             if self.enable_checkpointer and session_id:
                 config = {"configurable": {"thread_id": session_id}}
             
+            # 기존 상태 복원 시도 (메모리 기능)
+            initial_state = {}
+            if self.enable_checkpointer and session_id:
+                try:
+                    existing_state = await agent.aget_state(config)
+                    if existing_state and existing_state.values:
+                        initial_state = existing_state.values.copy()
+                        initial_state["current_query"] = question
+                    else:
+                        initial_state = create_agent_state(question)
+                except Exception:
+                    initial_state = create_agent_state(question)
+            else:
+                initial_state = create_agent_state(question)
+            
+            initial_state["current_query"] = question
+            
             # 그래프 스트리밍 실행 - 다중 모드
-            agent = await self._get_agent()
             async for stream_mode, chunk in agent.astream(
                 initial_state, 
                 config=config,

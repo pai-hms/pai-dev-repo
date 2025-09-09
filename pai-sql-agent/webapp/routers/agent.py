@@ -172,3 +172,66 @@ async def stream_sql_agent(request: QueryRequest):
             "Content-Type": "text/event-stream",
         }
     )
+
+
+@router.get("/test-memory")
+async def test_memory_functionality():
+    """메모리 기능 테스트 엔드포인트"""
+    try:
+        # 체크포인터 활성화된 서비스 생성
+        agent_service = get_sql_agent_service(enable_checkpointer=True)
+        test_session = f"test_{int(time.time())}"
+        
+        # 첫 번째 질문
+        result1 = await agent_service.invoke_query(
+            "안녕하세요! 저는 홍민식입니다.", 
+            session_id=test_session
+        )
+        
+        if result1.get('error_message'):
+            return {
+                "success": False,
+                "error": result1['error_message'],
+                "test_session": test_session
+            }
+        
+        # 두 번째 질문 (메모리 테스트)
+        result2 = await agent_service.invoke_query(
+            "제 이름이 뭐라고 했죠?", 
+            session_id=test_session
+        )
+        
+        if result2.get('error_message'):
+            return {
+                "success": False,
+                "error": result2['error_message'],
+                "test_session": test_session
+            }
+        
+        # 응답에서 이름이 포함되어 있는지 확인
+        messages2 = result2.get('messages', [])
+        answer = ""
+        if messages2:
+            for msg in reversed(messages2):
+                if hasattr(msg, 'type') and msg.type == 'ai' and hasattr(msg, 'content'):
+                    answer = str(msg.content)
+                    break
+        
+        memory_working = any(name in answer for name in ["홍민식", "민식", "홍"])
+        
+        return {
+            "success": True,
+            "memory_working": memory_working,
+            "test_session": test_session,
+            "first_response_messages": len(result1.get('messages', [])),
+            "second_response_messages": len(result2.get('messages', [])),
+            "second_response": answer[:200] if answer else "응답 없음",
+            "search_terms": ["홍민식", "민식", "홍"]
+        }
+        
+    except Exception as e:
+        logger.error(f"메모리 테스트 실패: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

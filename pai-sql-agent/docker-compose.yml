@@ -52,5 +52,25 @@ services:
     command: ["streamlit", "run", "webapp/streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
     restart: unless-stopped
 
+  # 메모리 기능 테스트 서비스
+  test-memory:
+    build: .
+    container_name: pai-sql-agent-test-memory
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - SGIS_SERVICE_ID=${SGIS_SERVICE_ID:-test}
+      - SGIS_SECURITY_KEY=${SGIS_SECURITY_KEY:-test}
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./src:/app/src
+      - ./webapp:/app/webapp
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "test_memory_simple.py"]
+    profiles: ["test"]  # 기본 실행에서 제외, 필요시에만 실행
+
 volumes:
   postgres_data:

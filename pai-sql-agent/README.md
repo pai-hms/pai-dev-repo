@@ -22,6 +22,9 @@ docker-compose up --build
 # 백그라운드 실행
 docker-compose up -d --build
 
+# 메모리 기능 테스트 (중요!)
+docker-compose --profile test run --rm test-memory
+
 # 완전 재빌드
 docker-compose down
 docker-compose build --no-cache
@@ -63,18 +66,48 @@ streamlit run webapp/streamlit_app.py --server.port 8501
 
 ## API 사용법
 
-### 질문하기
+### 기본 질문하기
 ```bash
 curl -X POST "http://localhost:8000/api/agent/query" \
   -H "Content-Type: application/json" \
   -d '{"question": "2023년 포항시의 인구는?"}'
 ```
 
+### 메모리 지원 질문하기 - AsyncPostgresSaver 기반
+```bash
+# 첫 번째 질문
+curl -X POST "http://localhost:8000/api/agent/query" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "안녕하세요! 저는 홍민식입니다.", "session_id": "my_session"}'
+
+# 연속 질문 (메모리 기능 확인)
+curl -X POST "http://localhost:8000/api/agent/query" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "제 이름이 뭐라고 했죠?", "session_id": "my_session"}'
+```
+
+### 메모리 기능 테스트
+```bash
+# Docker 환경에서 메모리 테스트 실행
+docker-compose --profile test run --rm test-memory
+
+# 또는 API로 직접 테스트
+curl -X GET "http://localhost:8000/api/agent/test-memory"
+
+# 세션 기록 조회
+curl -X GET "http://localhost:8000/api/agent/session/my_session/history"
+
+# 세션 삭제
+curl -X DELETE "http://localhost:8000/api/agent/session/my_session"
+```
+
 ## 주요 기능
 
 - 자연어 질문을 SQL 쿼리로 변환
 - 실시간 스트리밍 응답
-- PostgreSQL 기반 세션 관리
+- **AsyncPostgresSaver 메모리**: LangGraph 공식 PostgreSQL 체크포인터
+- **완전한 대화 기록 영속성**: 세션별 메모리 관리
+- **연속 대화 지원**: "내가 처음에 뭐 물어봤지?" 같은 질문 처리
 - SGIS API 통계 데이터 크롤링
 - FastAPI 기반 REST API
 - Streamlit 웹 인터페이스
