@@ -22,15 +22,14 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - SGIS_API_KEY=${SGIS_API_KEY:-}
-      - SGIS_SECRET_KEY=${SGIS_SECRET_KEY:-}
+      - SGIS_SERVICE_ID=${SGIS_API_KEY:-}  # 매핑 수정
+      - SGIS_SECURITY_KEY=${SGIS_SECRET_KEY:-}  # 매핑 수정
       - LOG_LEVEL=INFO
     depends_on:
       postgres:
         condition: service_healthy
     ports: ["8000:8000"]
     restart: unless-stopped
-    # command는 Dockerfile의 CMD 사용 → 따로 안 써도 됨
 
 volumes:
   postgres_data:

@@ -5,7 +5,6 @@ LangGraph 그래프 정의
 import logging
 from typing import Dict, Any, AsyncGenerator, Optional
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.graph import CompiledGraph
 
 from src.agent.nodes import (
     analyze_question, execute_tools, generate_response, 
@@ -22,7 +21,7 @@ class SQLAgentGraph:
     
     def __init__(self, enable_checkpointer: bool = True):
         self.enable_checkpointer = enable_checkpointer
-        self._compiled_graph: Optional[CompiledGraph] = None
+        self._compiled_graph = None
     
     def _create_graph(self) -> StateGraph:
         """그래프 생성"""
@@ -70,7 +69,7 @@ class SQLAgentGraph:
         
         return workflow
     
-    async def get_compiled_graph(self) -> CompiledGraph:
+    async def get_compiled_graph(self):
         """컴파일된 그래프 반환"""
         if self._compiled_graph is None:
             workflow = self._create_graph()
