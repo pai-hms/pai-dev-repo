@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import time
 from typing import Dict, List, Optional, Any, Union
-from datetime import datetime, timedelta  # timedelta 추가
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from enum import Enum
 
@@ -18,6 +18,7 @@ from src.config.settings import get_settings
 class SGISDataType(Enum):
     """SGIS 데이터 타입"""
     POPULATION = "population"
+    SEARCH_POPULATION = "searchpopulation"  # 추가
     HOUSEHOLD = "household"
     HOUSE = "house"
     COMPANY = "company"
@@ -47,7 +48,7 @@ class SGISResponse:
         """에러 메시지 반환"""
         return self.err_msg if not self.is_success else None
 
-# src/crawler/sgis_client.py
+
 class SGISClient:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -57,12 +58,14 @@ class SGISClient:
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
         
-        # SGIS API 엔드포인트 정의
+        # SGIS API 엔드포인트 정의 (10개 모두)
         self.endpoints = {
             SGISDataType.POPULATION: "/stats/population.json",
+            SGISDataType.SEARCH_POPULATION: "/stats/searchpopulation.json",
             SGISDataType.HOUSEHOLD: "/stats/household.json", 
             SGISDataType.HOUSE: "/stats/house.json",
             SGISDataType.COMPANY: "/stats/company.json",
+            SGISDataType.INDUSTRY_CODE: "/stats/industrycode.json",
             SGISDataType.FARM_HOUSEHOLD: "/stats/farmhousehold.json",
             SGISDataType.FORESTRY_HOUSEHOLD: "/stats/forestryhousehold.json",
             SGISDataType.FISHERY_HOUSEHOLD: "/stats/fisheryhousehold.json",
@@ -70,22 +73,20 @@ class SGISClient:
         }
 
     async def _get_access_token(self) -> str:
-        """액세스 토큰 획득 - SGIS 표준 방식"""
-        # 토큰이 유효한지 확인
+        """액세스 토큰 획득"""
         if (self._access_token and 
             self._token_expires_at and 
             datetime.now() < self._token_expires_at):
             return self._access_token
         
-        # SGIS 표준 인증 방식 (GET 방식으로 변경)
         auth_url = f"{self.base_url}/auth/authentication.json"
-        auth_params = {  # data → params로 변경
+        auth_params = {
             "consumer_key": self.service_id,
             "consumer_secret": self.security_key
         }
         
         async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
-            response = await client.get(auth_url, params=auth_params)  # POST → GET으로 변경
+            response = await client.get(auth_url, params=auth_params)
             response.raise_for_status()
             
             auth_result = response.json()
@@ -93,7 +94,6 @@ class SGISClient:
                 raise ValueError(f"인증 실패: {auth_result.get('errMsg')}")
             
             self._access_token = auth_result["result"]["accessToken"]
-            # 토큰 만료 시간을 4시간으로 설정 (여유를 두고 3시간 50분)
             self._token_expires_at = datetime.now() + timedelta(hours=3, minutes=50)
             
             return self._access_token
@@ -106,7 +106,7 @@ class SGISClient:
         """API 요청 실행"""
         access_token = await self._get_access_token()
         
-        request_params = {  # data → params로 변경
+        request_params = {
             "accessToken": access_token,
             **params
         }
@@ -116,7 +116,7 @@ class SGISClient:
         for attempt in range(self.settings.max_retries):
             try:
                 async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
-                    response = await client.get(url, params=request_params)  # POST → GET으로 변경
+                    response = await client.get(url, params=request_params)
                     response.raise_for_status()
                     
                     result = response.json()
@@ -132,11 +132,11 @@ class SGISClient:
                 if attempt == self.settings.max_retries - 1:
                     raise ValueError(f"API 요청 실패: {str(e)}")
                 
-                # 재시도 전 대기
                 await asyncio.sleep(2 ** attempt)
         
         raise ValueError("최대 재시도 횟수 초과")
     
+    # 1. 인구 통계
     async def get_population_stats(
         self,
         year: int,
@@ -156,6 +156,30 @@ class SGISClient:
             params
         )
     
+    # 2. 인구 검색 (새로 추가)
+    async def search_population_stats(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        gender: int = 0,
+        low_search: int = 1
+    ) -> SGISResponse:
+        """인구 통계 검색 (행정구역코드로)"""
+        params = {
+            "year": year,
+            "gender": gender,
+            "low_search": low_search
+        }
+        
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.SEARCH_POPULATION],
+            params
+        )
+    
+    # 3. 가구 통계
     async def get_household_stats(
         self,
         year: int,
@@ -175,6 +199,7 @@ class SGISClient:
             params
         )
     
+    # 4. 주택 통계
     async def get_house_stats(
         self,
         year: int,
@@ -194,6 +219,7 @@ class SGISClient:
             params
         )
     
+    # 5. 사업체 통계
     async def get_company_stats(
         self,
         year: int,
@@ -213,6 +239,41 @@ class SGISClient:
             params
         )
     
+    # 6. 산업 코드 (새로 추가)
+    async def get_industry_code(
+        self,
+        year: int,
+        adm_cd: Optional[str] = None,
+        low_search: int = 1,
+        industry_cd: Optional[str] = None
+    ) -> SGISResponse:
+        """산업 코드별 통계 조회"""
+        params = {
+            "year": year,
+            "low_search": low_search
+        }
+        if adm_cd:
+            params["adm_cd"] = adm_cd
+        if industry_cd:
+            params["industry_cd"] = industry_cd
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.INDUSTRY_CODE],
+            params
+        )
+    
+    async def get_industry_code(self, class_deg: str = "10") -> SGISResponse:
+        """산업분류 코드 조회"""
+        params = {
+            "class_deg": class_deg
+        }
+        
+        return await self._make_request(
+            self.endpoints[SGISDataType.INDUSTRY_CODE],
+            params
+        )
+    
+    # 7. 농가 통계
     async def get_farm_household_stats(
         self,
         year: int,
@@ -232,6 +293,7 @@ class SGISClient:
             params
         )
     
+    # 8. 임가 통계
     async def get_forestry_household_stats(
         self,
         year: int,
@@ -251,6 +313,7 @@ class SGISClient:
             params
         )
     
+    # 9. 어가 통계
     async def get_fishery_household_stats(
         self,
         year: int,
@@ -272,6 +335,7 @@ class SGISClient:
             params
         )
     
+    # 10. 가구원 통계
     async def get_household_member_stats(
         self,
         year: int,
@@ -305,7 +369,6 @@ class SGISClient:
     
     async def get_all_administrative_divisions(self) -> List[Dict[str, str]]:
         """모든 행정구역 코드 조회"""
-        # 시도 목록 조회
         sido_response = await self.get_population_stats(year=2023, low_search=1)
         
         if not sido_response.is_success:
@@ -324,7 +387,6 @@ class SGISClient:
                 "level": "sido"
             })
             
-            # 시군구 목록 조회
             try:
                 sigungu_response = await self.get_population_stats(
                     year=2023, 
@@ -342,7 +404,6 @@ class SGISClient:
                                 "level": "sigungu"
                             })
                 
-                # API 호출 간격 조정
                 await asyncio.sleep(0.1)
                 
             except Exception as e:

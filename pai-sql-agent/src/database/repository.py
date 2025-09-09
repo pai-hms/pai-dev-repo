@@ -5,13 +5,14 @@
 from typing import List, Optional, Dict, Any, Type, Union
 from datetime import datetime
 from sqlalchemy import select, insert, update, delete, text, desc, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.database.models import (
-    Base, PopulationStats, HouseholdStats, HouseStats, CompanyStats,
+    Base, PopulationStats, PopulationSearchStats, HouseholdStats, HouseStats, CompanyStats,
     FarmHouseholdStats, ForestryHouseholdStats, FisheryHouseholdStats,
-    HouseholdMemberStats, CrawlLog
+    HouseholdMemberStats, CrawlLog, IndustryCodeStats
 )
 
 
@@ -74,13 +75,62 @@ class BaseRepository:
             select(func.count(self.model.id))
         )
         return result.scalar()
+    
+    async def upsert_batch(self, data_list: List[Dict[str, Any]]) -> None:
+        """대량 upsert (insert or update)"""
+        if not data_list:
+            return
+        
+        # PostgreSQL의 ON CONFLICT를 사용한 upsert
+        stmt = pg_insert(self.model).values(data_list)
+        
+        # 중복 키 처리: 모든 컬럼 업데이트 (id, created_at 제외)
+        excluded_columns = {
+            col.name: stmt.excluded[col.name]
+            for col in self.model.__table__.columns
+            if col.name not in ['id', 'created_at']
+        }
+        
+        # year와 adm_cd가 있는 모델들의 경우 이를 기준으로 conflict 처리
+        if hasattr(self.model, 'year') and hasattr(self.model, 'adm_cd'):
+            # 어가통계는 oga_div도 포함
+            if hasattr(self.model, 'oga_div'):
+                conflict_columns = ['year', 'adm_cd', 'oga_div']
+            # 가구원통계는 data_type도 포함
+            elif hasattr(self.model, 'data_type'):
+                conflict_columns = ['year', 'adm_cd', 'data_type']
+            else:
+                conflict_columns = ['year', 'adm_cd']
+            
+            stmt = stmt.on_conflict_do_update(
+                index_elements=conflict_columns,
+                set_=excluded_columns
+            )
+        elif hasattr(self.model, 'industry_cd'):
+            # 산업분류는 industry_cd 기준
+            stmt = stmt.on_conflict_do_update(
+                index_elements=['industry_cd'],
+                set_=excluded_columns
+            )
+        else:
+            # 기본적으로 모든 데이터를 새로 삽입 (conflict 무시)
+            stmt = stmt.on_conflict_do_nothing()
+        
+        await self.session.execute(stmt)
 
 
 class PopulationRepository(BaseRepository):
-    """인구 통계 리포지토리"""
+    """인구 통계 리포지토리 (총조사 주요지표)"""
     
     def __init__(self, session: AsyncSession):
         super().__init__(session, PopulationStats)
+
+
+class PopulationSearchRepository(BaseRepository):
+    """인구통계 검색 리포지토리 (searchpopulation.json)"""
+    
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, PopulationSearchStats)
     
     async def get_by_year_and_adm(
         self, 
@@ -210,6 +260,93 @@ class CompanyRepository(BaseRepository):
                 await self.create(**data)
 
 
+class HouseRepository(BaseRepository):
+    """주택 통계 리포지토리"""
+    
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, HouseStats)
+    
+    async def upsert_batch(self, data_list: List[Dict[str, Any]]) -> None:
+        """주택 통계 데이터 배치 업서트"""
+        if not data_list:
+            return
+        
+        for data in data_list:
+            existing = await self.session.execute(
+                select(HouseStats).where(
+                    HouseStats.year == data["year"],
+                    HouseStats.adm_cd == data["adm_cd"]
+                )
+            )
+            existing_record = existing.scalar_one_or_none()
+            
+            if existing_record:
+                for key, value in data.items():
+                    if hasattr(existing_record, key):
+                        setattr(existing_record, key, value)
+            else:
+                new_record = HouseStats(**data)
+                self.session.add(new_record)
+
+
+class IndustryCodeRepository(BaseRepository):
+    """산업분류 통계 리포지토리"""
+    
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, IndustryCodeStats)
+    
+    async def upsert_batch(self, data_list: List[Dict[str, Any]]) -> None:
+        """산업분류 통계 데이터 배치 업서트"""
+        if not data_list:
+            return
+        
+        for data in data_list:
+            existing = await self.session.execute(
+                select(IndustryCodeStats).where(
+                    IndustryCodeStats.year == data["year"],
+                    IndustryCodeStats.adm_cd == data["adm_cd"],
+                    IndustryCodeStats.industry_cd == data.get("industry_cd")
+                )
+            )
+            existing_record = existing.scalar_one_or_none()
+            
+            if existing_record:
+                for key, value in data.items():
+                    if hasattr(existing_record, key):
+                        setattr(existing_record, key, value)
+            else:
+                new_record = IndustryCodeStats(**data)
+                self.session.add(new_record)
+
+
+class FarmHouseholdRepository(BaseRepository):
+    """농가 통계 Repository"""
+    
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, FarmHouseholdStats)
+
+
+class ForestryHouseholdRepository(BaseRepository):
+    """임가 통계 Repository"""
+    
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, ForestryHouseholdStats)
+
+
+class FisheryHouseholdRepository(BaseRepository):
+    """어가 통계 Repository"""
+    
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, FisheryHouseholdStats)
+
+
+class HouseholdMemberRepository(BaseRepository):
+    """가구원 통계 Repository"""
+    
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, HouseholdMemberStats)
+
+
 class CrawlLogRepository(BaseRepository):
     """크롤링 로그 리포지토리"""
     
@@ -280,8 +417,15 @@ class DatabaseService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.population = PopulationRepository(session)
+        self.population_search = PopulationSearchRepository(session)
         self.household = HouseholdRepository(session)
+        self.house = HouseRepository(session)
         self.company = CompanyRepository(session)
+        self.industry = IndustryCodeRepository(session)
+        self.farm_household = FarmHouseholdRepository(session)
+        self.forestry_household = ForestryHouseholdRepository(session)
+        self.fishery_household = FisheryHouseholdRepository(session)
+        self.household_member = HouseholdMemberRepository(session)
         self.crawl_log = CrawlLogRepository(session)
     
     async def execute_raw_query(self, query: str) -> List[Dict[str, Any]]:

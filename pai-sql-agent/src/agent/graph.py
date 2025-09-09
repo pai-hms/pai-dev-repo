@@ -172,7 +172,7 @@ class SQLAgentService:
         question: str, 
         session_id: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """쿼리 실행 (스트리밍)"""
+        """쿼리 실행 (스트리밍) - LLM 토큰별 스트리밍"""
         try:
             # 초기 상태 생성
             initial_state = create_agent_state(question).__dict__
@@ -182,19 +182,73 @@ class SQLAgentService:
             if self.enable_checkpointer and session_id:
                 config = {"configurable": {"thread_id": session_id}}
             
-            # 그래프 스트리밍 실행
+            # 그래프 스트리밍 실행 - messages 모드로 LLM 토큰 스트리밍
             agent = await self._get_agent()
-            async for chunk in agent.astream(initial_state, config=config):
-                yield chunk
+            async for message_chunk, metadata in agent.astream(
+                initial_state, 
+                config=config,
+                stream_mode="messages"  # LLM 토큰별 스트리밍
+            ):
+                # LLM 토큰이 있으면 바로 전달
+                if hasattr(message_chunk, 'content') and message_chunk.content:
+                    yield {
+                        "type": "token",
+                        "content": message_chunk.content,
+                        "metadata": metadata
+                    }
                 
         except Exception as e:
             logger.error(f"스트리밍 쿼리 실행 중 오류: {str(e)}")
             yield {
-                "error_message": f"스트리밍 실행 중 오류가 발생했습니다: {str(e)}",
-                "is_complete": True,
-                "messages": []
+                "type": "error",
+                "content": f"스트리밍 실행 중 오류가 발생했습니다: {str(e)}"
             }
     
+    async def stream_query_with_updates(
+        self, 
+        question: str, 
+        session_id: Optional[str] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """쿼리 실행 (혼합 스트리밍) - 토큰 + 업데이트"""
+        try:
+            # 초기 상태 생성
+            initial_state = create_agent_state(question).__dict__
+            
+            # 설정 생성
+            config = None
+            if self.enable_checkpointer and session_id:
+                config = {"configurable": {"thread_id": session_id}}
+            
+            # 그래프 스트리밍 실행 - 다중 모드
+            agent = await self._get_agent()
+            async for stream_mode, chunk in agent.astream(
+                initial_state, 
+                config=config,
+                stream_mode=["messages", "updates"]  # 토큰 + 노드 업데이트
+            ):
+                if stream_mode == "messages":
+                    # LLM 토큰 스트리밍
+                    message_chunk, metadata = chunk
+                    if hasattr(message_chunk, 'content') and message_chunk.content:
+                        yield {
+                            "type": "token",
+                            "content": message_chunk.content,
+                            "metadata": metadata
+                        }
+                elif stream_mode == "updates":
+                    # 노드 업데이트
+                    yield {
+                        "type": "update",
+                        "content": chunk
+                    }
+                
+        except Exception as e:
+            logger.error(f"스트리밍 쿼리 실행 중 오류: {str(e)}")
+            yield {
+                "type": "error",
+                "content": f"스트리밍 실행 중 오류가 발생했습니다: {str(e)}"
+            }
+
     async def get_chat_history(self, session_id: str) -> list:
         """채팅 기록 조회"""
         if not self.enable_checkpointer:

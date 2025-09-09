@@ -75,7 +75,7 @@ async def query_sql_agent(request: QueryRequest) -> QueryResponse:
 
 @router.post("/query/stream")
 async def stream_sql_agent(request: QueryRequest):
-    """SQL Agent에 질문을 보내고 스트리밍 응답을 받습니다"""
+    """SQL Agent에 질문을 보내고 스트리밍 응답을 받습니다 (LLM 토큰별)"""
     
     async def generate_stream() -> AsyncGenerator[str, None]:
         try:
@@ -85,48 +85,23 @@ async def stream_sql_agent(request: QueryRequest):
             # 에이전트 서비스 가져오기
             agent_service = get_sql_agent_service(enable_checkpointer=True)
             
-            # 시작 메시지
-            start_chunk = StreamChunk(
-                type="message",
-                content="질문을 분석하고 있습니다..."
-            )
-            yield f"data: {start_chunk.model_dump_json()}\n\n"
-            
-            # 스트리밍 실행
+            # LLM 토큰별 스트리밍 실행
             async for chunk in agent_service.stream_query(request.question, session_id):
-                # 각 노드 실행 결과를 스트리밍
-                for node_name, node_result in chunk.items():
-                    if node_name == "generate_response":
-                        # 최종 응답인 경우
-                        messages = node_result.get("messages", [])
-                        if messages:
-                            last_msg = messages[-1]
-                            if hasattr(last_msg, 'content'):
-                                response_chunk = StreamChunk(
-                                    type="message",
-                                    content=str(last_msg.content)
-                                )
-                                yield f"data: {response_chunk.model_dump_json()}\n\n"
-                    
-                    elif node_name == "execute_tools":
-                        # 도구 실행 결과인 경우
-                        sql_results = node_result.get("sql_results", [])
-                        if sql_results:
-                            for sql_result in sql_results:
-                                sql_chunk = StreamChunk(
-                                    type="sql_result",
-                                    content=sql_result
-                                )
-                                yield f"data: {sql_chunk.model_dump_json()}\n\n"
-                    
+                if chunk.get("type") == "token":
+                    # LLM 토큰을 바로 전달
+                    token_chunk = StreamChunk(
+                        type="token",
+                        content=chunk["content"]
+                    )
+                    yield f"data: {token_chunk.model_dump_json()}\n\n"
+                elif chunk.get("type") == "error":
                     # 에러 처리
-                    if node_result.get("error_message"):
-                        error_chunk = StreamChunk(
-                            type="error",
-                            content=node_result["error_message"]
-                        )
-                        yield f"data: {error_chunk.model_dump_json()}\n\n"
-                        return
+                    error_chunk = StreamChunk(
+                        type="error",
+                        content=chunk["content"]
+                    )
+                    yield f"data: {error_chunk.model_dump_json()}\n\n"
+                    return
             
             # 완료 메시지
             complete_chunk = StreamChunk(

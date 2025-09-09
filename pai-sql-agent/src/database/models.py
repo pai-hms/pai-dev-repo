@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, Text, BigInteger, 
-    Boolean, JSON, ForeignKey, Index
+    Boolean, JSON, ForeignKey, Index, UniqueConstraint
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -47,9 +47,50 @@ class PopulationStats(Base, TimestampMixin):
     age_15_64 = Column(BigInteger, nullable=True, comment="15-64세 인구")
     age_65_over = Column(BigInteger, nullable=True, comment="65세 이상 인구")
     
+    # 총조사 주요지표 추가 필드들
+    tot_family = Column(BigInteger, nullable=True, comment="총가구")
+    avg_fmember_cnt = Column(Float, nullable=True, comment="평균가구원수")
+    tot_house = Column(BigInteger, nullable=True, comment="총주택")
+    nongga_cnt = Column(BigInteger, nullable=True, comment="농가(가구)")
+    nongga_ppltn = Column(BigInteger, nullable=True, comment="농가 인구")
+    imga_cnt = Column(BigInteger, nullable=True, comment="임가(가구)")
+    imga_ppltn = Column(BigInteger, nullable=True, comment="임가 인구")
+    naesuoga_cnt = Column(BigInteger, nullable=True, comment="내수면 어가(가구)")
+    naesuoga_ppltn = Column(BigInteger, nullable=True, comment="내수면 어가 인구")
+    haesuoga_cnt = Column(BigInteger, nullable=True, comment="해수면 어가(가구)")
+    haesuoga_ppltn = Column(BigInteger, nullable=True, comment="해수면 어가인구")
+    employee_cnt = Column(BigInteger, nullable=True, comment="종업원수(전체 사업체)")
+    corp_cnt = Column(BigInteger, nullable=True, comment="사업체수(전체 사업체)")
+    
     __table_args__ = (
         Index("idx_population_year_adm", "year", "adm_cd"),
         Index("idx_population_adm_nm", "adm_nm"),
+        UniqueConstraint("year", "adm_cd", name="uq_population_year_adm"),
+    )
+
+
+class PopulationSearchStats(Base, TimestampMixin):
+    """인구통계 검색 데이터 (searchpopulation.json)"""
+    __tablename__ = "population_search_stats"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False, comment="기준연도")
+    adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
+    
+    # 검색 조건
+    gender = Column(Integer, nullable=True, comment="성별(0:전체, 1:남자, 2:여자)")
+    age_type = Column(String(10), nullable=True, comment="연령타입")
+    edu_level = Column(String(10), nullable=True, comment="교육정도")
+    mrg_state = Column(Integer, nullable=True, comment="혼인상태")
+    
+    # 인구수
+    population = Column(BigInteger, nullable=True, comment="인구수")
+    
+    __table_args__ = (
+        Index("idx_pop_search_year_adm", "year", "adm_cd"),
+        Index("idx_pop_search_gender", "gender"),
+        UniqueConstraint("year", "adm_cd", "gender", "age_type", "edu_level", "mrg_state", name="uq_pop_search_full"),
     )
 
 
@@ -64,6 +105,7 @@ class HouseholdStats(Base, TimestampMixin):
     
     # 가구 관련 지표
     household_cnt = Column(BigInteger, nullable=True, comment="가구수")
+    family_member_cnt = Column(BigInteger, nullable=True, comment="가구원수")
     avg_household_size = Column(Float, nullable=True, comment="평균 가구원수")
     
     # 가구 유형별
@@ -72,8 +114,8 @@ class HouseholdStats(Base, TimestampMixin):
     
     __table_args__ = (
         Index("idx_household_year_adm", "year", "adm_cd"),
+        UniqueConstraint("year", "adm_cd", name="uq_household_year_adm"),
     )
-
 
 class HouseStats(Base, TimestampMixin):
     """주택 통계 데이터"""
@@ -86,16 +128,14 @@ class HouseStats(Base, TimestampMixin):
     
     # 주택 관련 지표
     house_cnt = Column(BigInteger, nullable=True, comment="주택수")
-    
-    # 주택 유형별
     apartment_cnt = Column(BigInteger, nullable=True, comment="아파트수")
     detached_house_cnt = Column(BigInteger, nullable=True, comment="단독주택수")
     row_house_cnt = Column(BigInteger, nullable=True, comment="연립주택수")
     
     __table_args__ = (
         Index("idx_house_year_adm", "year", "adm_cd"),
+        UniqueConstraint("year", "adm_cd", name="uq_house_year_adm"),
     )
-
 
 class CompanyStats(Base, TimestampMixin):
     """사업체 통계 데이터"""
@@ -112,8 +152,29 @@ class CompanyStats(Base, TimestampMixin):
     
     __table_args__ = (
         Index("idx_company_year_adm", "year", "adm_cd"),
+        UniqueConstraint("year", "adm_cd", name="uq_company_year_adm"),
     )
 
+
+class IndustryCodeStats(Base, TimestampMixin):
+    """산업분류별 통계 데이터"""
+    __tablename__ = "industry_code_stats"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=True, comment="기준연도")
+    adm_cd = Column(String(20), nullable=True, comment="행정구역코드")
+    adm_nm = Column(String(255), nullable=True, comment="행정구역명")
+    industry_cd = Column(String(10), nullable=True, comment="산업분류코드")
+    industry_nm = Column(String(255), nullable=True, comment="산업분류명")
+    
+    # 산업별 지표
+    company_cnt = Column(BigInteger, nullable=True, comment="사업체수")
+    employee_cnt = Column(BigInteger, nullable=True, comment="종사자수")
+    
+    __table_args__ = (
+        Index("idx_industry_code", "industry_cd"),
+        UniqueConstraint("industry_cd", name="uq_industry_code"),
+    )
 
 class FarmHouseholdStats(Base, TimestampMixin):
     """농가 통계 데이터"""
@@ -131,6 +192,7 @@ class FarmHouseholdStats(Base, TimestampMixin):
     
     __table_args__ = (
         Index("idx_farm_year_adm", "year", "adm_cd"),
+        UniqueConstraint("year", "adm_cd", name="uq_farm_year_adm"),
     )
 
 
@@ -150,6 +212,7 @@ class ForestryHouseholdStats(Base, TimestampMixin):
     
     __table_args__ = (
         Index("idx_forestry_year_adm", "year", "adm_cd"),
+        UniqueConstraint("year", "adm_cd", name="uq_forestry_year_adm"),
     )
 
 
@@ -170,6 +233,7 @@ class FisheryHouseholdStats(Base, TimestampMixin):
     
     __table_args__ = (
         Index("idx_fishery_year_adm_div", "year", "adm_cd", "oga_div"),
+        UniqueConstraint("year", "adm_cd", "oga_div", name="uq_fishery_year_adm_div"),
     )
 
 
@@ -191,6 +255,7 @@ class HouseholdMemberStats(Base, TimestampMixin):
     
     __table_args__ = (
         Index("idx_member_year_adm_type", "year", "adm_cd", "data_type"),
+        UniqueConstraint("year", "adm_cd", "data_type", "gender", "age_from", "age_to", name="uq_member_full"),
     )
 
 

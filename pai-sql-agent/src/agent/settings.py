@@ -11,7 +11,7 @@ from src.config.settings import get_settings
 @dataclass
 class AgentConfig:
     """에이전트 설정"""
-    model_name: str = "gpt-4-turbo-preview"
+    model_name: str = "gpt-4o-mini"
     temperature: float = 0.1
     max_tokens: int = 4000
     max_iterations: int = 10
@@ -100,7 +100,16 @@ TABLE_SCHEMA_INFO = """
 - population: 어가인구수(명)
 - avg_population: 어가 평균 인구수(명)
 
-### 8. household_member_stats (가구원 통계)
+### 8. industry_code_stats (산업분류별 통계)
+- year: 기준연도 (2021-2023)
+- adm_cd: 행정구역코드
+- adm_nm: 행정구역명
+- industry_cd: 산업분류코드
+- industry_nm: 산업분류명
+- company_cnt: 사업체수
+- employee_cnt: 종사자수
+
+### 9. household_member_stats (가구원 통계)
 - year: 기준연도 (2000, 2005, 2010, 2015, 2020)
 - adm_cd: 행정구역코드
 - adm_nm: 행정구역명

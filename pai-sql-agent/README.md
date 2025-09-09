@@ -30,6 +30,9 @@ docker-compose up -d
 # 종료 후 재실행
 docker-compose down
 docker-compose  up
+
+# streamlit app 재실행
+docker-compose restart streamlit app
 ```
 
 ### 3. 로컬 개발 환경

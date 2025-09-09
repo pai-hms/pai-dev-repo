@@ -3,7 +3,7 @@ import requests
 import json
 import time
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Generator  # Generator 추가
 
 # 페이지 설정
 st.set_page_config(
@@ -112,6 +112,33 @@ def call_agent_api(question: str, stream: bool = False) -> Dict[str, Any]:
         }
 
 
+def call_agent_api_stream(question: str) -> Generator[str, None, None]:
+    """Agent API 스트리밍 호출 - Generator로 변경"""
+    try:
+        url = f"{API_BASE_URL}/api/agent/query/stream"
+        payload = {
+            "question": question,
+            "session_id": st.session_state.session_id
+        }
+        
+        response = requests.post(url, json=payload, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        for line in response.iter_lines():
+            if line and line.startswith(b'data: '):
+                data = json.loads(line[6:])  # "data: " 제거
+                if data.get("type") == "token":
+                    yield data["content"]
+                elif data.get("type") == "complete":
+                    break
+                elif data.get("type") == "error":
+                    yield f"\n오류: {data['content']}"
+                    break
+                    
+    except Exception as e:
+        yield f"\n오류: {str(e)}"
+
+
 def get_tables() -> List[str]:
     """테이블 목록 조회"""
     try:
@@ -131,19 +158,6 @@ def get_table_info(table_name: str) -> Dict[str, Any]:
     except:
         return {}
 
-
-def search_admin_area(search_term: str) -> List[Dict[str, str]]:
-    """행정구역 검색"""
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/api/data/search/admin-area",
-            json={"search_term": search_term},
-            timeout=10
-        )
-        response.raise_for_status()
-        return response.json().get("results", [])
-    except:
-        return []
 
 
 # 메인 UI
@@ -176,18 +190,7 @@ with st.sidebar:
                         st.session_state.selected_table = table_info
         else:
             st.warning("테이블을 불러올 수 없습니다.")
-    
-    # 행정구역 검색
-    with st.expander("행정구역 검색"):
-        search_term = st.text_input("지역명 입력", placeholder="예: 포항, 서울, 강남구")
-        if search_term:
-            areas = search_admin_area(search_term)
-            if areas:
-                st.write("검색 결과:")
-                for area in areas[:10]:
-                    st.write(f"• {area['adm_nm']} ({area['adm_cd']}) - {area['level']}")
-            else:
-                st.warning("검색 결과가 없습니다.")
+
     
     # 도움말
     with st.expander("💡 사용 팁"):
@@ -244,45 +247,52 @@ with col1:
         with st.chat_message("user"):
             st.write(prompt)
         
-        # AI 응답 생성
+        # AI 응답 생성 (스트리밍)
         with st.chat_message("assistant"):
-            with st.spinner("답변을 생성하는 중..."):
-                response = call_agent_api(prompt)
+            response_placeholder = st.empty()
+            full_response = ""
+            
+            try:
+                for token in call_agent_api_stream(prompt):
+                    full_response += token
+                    response_placeholder.write(full_response + "▌")  # 커서 효과
                 
-                if response.get("success"):
-                    # 성공적인 응답
-                    message_content = response.get("message", "응답을 받았습니다.")
-                    st.write(message_content)
+                response_placeholder.write(full_response)  # 최종 응답
+                
+                # 메시지 저장
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": full_response
+                })
+            except Exception as e:
+                # 스트리밍 실패 시 일반 API 호출
+                st.error(f"스트리밍 연결 실패: {str(e)}")
+                with st.spinner("답변을 생성하는 중..."):
+                    response = call_agent_api(prompt)
                     
-                    # SQL 쿼리 표시
-                    sql_queries = response.get("sql_queries", [])
-                    if sql_queries:
-                        st.markdown("**실행된 SQL 쿼리:**")
-                        for i, sql in enumerate(sql_queries, 1):
-                            st.code(sql, language="sql")
-                    
-                    # 처리 시간 표시
-                    processing_time = response.get("processing_time")
-                    if processing_time:
-                        st.caption(f"처리 시간: {processing_time:.2f}초")
-                    
-                    # 메시지 저장
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": message_content,
-                        "sql_queries": sql_queries,
-                        "processing_time": processing_time
-                    })
-                    
-                else:
-                    # 에러 응답
-                    error_msg = response.get("error_message", "알 수 없는 오류가 발생했습니다.")
-                    st.error(f"오류: {error_msg}")
-                    
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"죄송합니다. 오류가 발생했습니다: {error_msg}"
-                    })
+                    if response.get("success"):
+                        message_content = response.get("message", "응답을 받았습니다.")
+                        st.write(message_content)
+                        
+                        # SQL 쿼리 표시
+                        sql_queries = response.get("sql_queries", [])
+                        if sql_queries:
+                            st.markdown("**실행된 SQL 쿼리:**")
+                            for i, sql in enumerate(sql_queries, 1):
+                                st.code(sql, language="sql")
+                        
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": message_content,
+                            "sql_queries": sql_queries
+                        })
+                    else:
+                        error_msg = response.get("error_message", "알 수 없는 오류가 발생했습니다.")
+                        st.error(f"오류: {error_msg}")
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": f"죄송합니다. 오류가 발생했습니다: {error_msg}"
+                        })
 
 with col2:
     st.header("⚙️ 설정")
