@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import time
 from typing import Dict, List, Optional, Any, Union
-from datetime import datetime
+from datetime import datetime, timedelta  # timedelta 추가
 from dataclasses import dataclass
 from enum import Enum
 
@@ -52,10 +52,22 @@ class SGISClient:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.base_url = self.settings.sgis_base_url
-        self.service_id = self.settings.sgis_service_id      # 변경
-        self.security_key = self.settings.sgis_security_key  # 변경
+        self.service_id = self.settings.sgis_service_id
+        self.security_key = self.settings.sgis_security_key
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
+        
+        # SGIS API 엔드포인트 정의
+        self.endpoints = {
+            SGISDataType.POPULATION: "/stats/population.json",
+            SGISDataType.HOUSEHOLD: "/stats/household.json", 
+            SGISDataType.HOUSE: "/stats/house.json",
+            SGISDataType.COMPANY: "/stats/company.json",
+            SGISDataType.FARM_HOUSEHOLD: "/stats/farmhousehold.json",
+            SGISDataType.FORESTRY_HOUSEHOLD: "/stats/forestryhousehold.json",
+            SGISDataType.FISHERY_HOUSEHOLD: "/stats/fisheryhousehold.json",
+            SGISDataType.HOUSEHOLD_MEMBER: "/stats/householdmember.json"
+        }
 
     async def _get_access_token(self) -> str:
         """액세스 토큰 획득 - SGIS 표준 방식"""
@@ -65,15 +77,15 @@ class SGISClient:
             datetime.now() < self._token_expires_at):
             return self._access_token
         
-        # SGIS 표준 인증 방식
+        # SGIS 표준 인증 방식 (GET 방식으로 변경)
         auth_url = f"{self.base_url}/auth/authentication.json"
-        auth_data = {
-            "consumer_key": self.service_id,      # 서비스 ID
-            "consumer_secret": self.security_key  # 보안 키
+        auth_params = {  # data → params로 변경
+            "consumer_key": self.service_id,
+            "consumer_secret": self.security_key
         }
         
         async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
-            response = await client.post(auth_url, data=auth_data)
+            response = await client.get(auth_url, params=auth_params)  # POST → GET으로 변경
             response.raise_for_status()
             
             auth_result = response.json()
@@ -94,7 +106,7 @@ class SGISClient:
         """API 요청 실행"""
         access_token = await self._get_access_token()
         
-        request_data = {
+        request_params = {  # data → params로 변경
             "accessToken": access_token,
             **params
         }
@@ -104,7 +116,7 @@ class SGISClient:
         for attempt in range(self.settings.max_retries):
             try:
                 async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
-                    response = await client.post(url, data=request_data)
+                    response = await client.get(url, params=request_params)  # POST → GET으로 변경
                     response.raise_for_status()
                     
                     result = response.json()

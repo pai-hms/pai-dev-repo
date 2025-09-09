@@ -21,6 +21,10 @@ docker-compose up --build
 
 # 백그라운드 실행
 docker-compose up -d --build
+
+# 종료 후 재실행
+docker-compose down
+docker-compose  up
 ```
 
 ### 3. 로컬 개발 환경
@@ -128,3 +132,49 @@ docker-compose build --no-cache
 - 경상북도 시군구별 2020년 대비 2023년 인구 증감률
 - 전국에서 고령화지수가 가장 높은 지역 10곳
 - 포항시 남구와 북구의 사업체 수 비교
+
+## 데이터베이스 접근
+
+```bash
+# PostgreSQL 접속
+docker-compose exec postgres psql -U postgres -d pai_sql_agent
+
+# 테이블 목록 확인
+\dt
+
+# 데이터 확인
+SELECT COUNT(*) FROM population_stats;
+SELECT * FROM crawl_logs ORDER BY created_at DESC LIMIT 10;
+
+# 크롤링 실행
+docker-compose exec app python -m src.database.init_data
+```
+
+## 빠른 데이터 확인 명령어
+
+```bash
+# 한 줄로 데이터 개수 확인
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "SELECT COUNT(*) FROM population_stats;"
+
+# 연도별 데이터 현황
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "SELECT year, COUNT(*) FROM population_stats GROUP BY year ORDER BY year;"
+
+# 최근 크롤링 로그 확인
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "SELECT api_endpoint, year, status, created_at FROM crawl_logs ORDER BY created_at DESC LIMIT 5;"
+
+# 실제 지역명들 확인
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "SELECT DISTINCT adm_nm FROM population_stats ORDER BY adm_nm;"
+
+# 특정 지역 데이터 확인 (예: 경기도)
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "SELECT year, adm_nm, tot_ppltn FROM population_stats WHERE adm_nm LIKE '%경기도%' ORDER BY year;"
+
+# 현재 저장된 데이터의 행정구역 코드 길이 확인
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "SELECT adm_cd, adm_nm, LENGTH(adm_cd) as code_length FROM population_stats WHERE year = 2023 ORDER BY adm_cd LIMIT 10;"
+
+# 테이블 구조 확인
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "\d population_stats"
+
+# 샘플 데이터 확인
+docker-compose exec postgres psql -U postgres -d pai_sql_agent -c "SELECT adm_cd, adm_nm, tot_ppltn FROM population_stats WHERE year = 2023 ORDER BY adm_cd;"
+
+```
