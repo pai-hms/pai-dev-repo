@@ -113,7 +113,7 @@ def search_admin_area(search_term: str) -> List[Dict[str, str]]:
 
 # 메인 UI
 st.title("🔍 PAI SQL Agent")
-st.subtitle("한국 센서스 통계 데이터 AI 분석 도구")
+st.subheader("한국 센서스 통계 데이터 AI 분석 도구")  # subtitle → subheader로 변경
 
 # 사이드바
 with st.sidebar:
