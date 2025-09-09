@@ -13,29 +13,213 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# 채팅 UI 개선을 위한 JavaScript
+st.markdown("""
+<script>
+// 채팅 메시지 자동 스크롤 및 입력창 고정
+function setupChatUI() {
+    // 채팅 메시지 영역 자동 스크롤 (하단으로)
+    function scrollToBottom() {
+        const chatMessages = document.getElementById('chat-messages');
+        if (chatMessages) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    }
+    
+    // 입력창 고정 설정
+    function fixChatInput() {
+        const chatInput = document.querySelector('[data-testid="stChatInput"]');
+        if (chatInput && !chatInput.classList.contains('fixed')) {
+            const container = chatInput.closest('.stChatInput');
+            if (container) {
+                container.style.position = 'fixed';
+                container.style.bottom = '0';
+                container.style.left = '0';
+                container.style.right = '0';
+                container.style.zIndex = '1000';
+                container.style.backgroundColor = 'white';
+                container.style.borderTop = '2px solid #e9ecef';
+                container.style.padding = '1rem';
+                container.style.boxShadow = '0 -4px 12px rgba(0,0,0,0.1)';
+                chatInput.classList.add('fixed');
+            }
+        }
+    }
+    
+    // DOM 변화 감지
+    const observer = new MutationObserver((mutations) => {
+        let shouldScroll = false;
+        
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'childList') {
+                // 새 메시지가 추가되었는지 확인
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === 1 && 
+                        (node.querySelector('[data-testid="chat-message"]') || 
+                         node.matches('[data-testid="chat-message"]'))) {
+                        shouldScroll = true;
+                    }
+                });
+            }
+        });
+        
+        if (shouldScroll) {
+            setTimeout(scrollToBottom, 100);
+        }
+        
+        fixChatInput();
+    });
+    
+    // 페이지 전체 감시
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    // 초기 설정
+    fixChatInput();
+    scrollToBottom();
+    
+    // 윈도우 리사이즈 시 재조정
+    window.addEventListener('resize', () => {
+        fixChatInput();
+        setTimeout(scrollToBottom, 100);
+    });
+}
+
+// 페이지 로드 후 실행
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupChatUI);
+} else {
+    setupChatUI();
+}
+
+// Streamlit의 rerun 후에도 실행
+setTimeout(setupChatUI, 500);
+</script>
+""", unsafe_allow_html=True)
+
 # 스타일 설정
 st.markdown("""
 <style>
+    /* 전체 레이아웃 */
     .main {
         padding-top: 1rem;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
     }
-    .stChat {
-        max-height: 600px;
+    
+    /* 채팅 컨테이너 */
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 120px);
+        max-height: calc(100vh - 120px);
+    }
+    
+    /* 채팅 메시지 영역 */
+    .chat-messages {
+        flex: 1;
         overflow-y: auto;
+        padding: 1rem 0;
+        margin-bottom: 1rem;
+        max-height: calc(100vh - 200px);
+        min-height: 400px;
     }
+    
+    /* 채팅 메시지 스타일 */
+    .chat-message {
+        margin-bottom: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 1rem;
+        max-width: 80%;
+        word-wrap: break-word;
+    }
+    
+    .user-message {
+        background-color: #007bff;
+        color: white;
+        margin-left: auto;
+        text-align: right;
+    }
+    
+    .assistant-message {
+        background-color: #f8f9fa;
+        color: #333;
+        border: 1px solid #e9ecef;
+    }
+    
+    /* 입력창 영역 - 하단 고정 */
+    .chat-input-container {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: white;
+        border-top: 2px solid #e9ecef;
+        padding: 1rem;
+        z-index: 1000;
+        box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+    }
+    
+    /* 사이드바 있는 경우 입력창 위치 조정 */
+    .main.main-content {
+        margin-bottom: 100px;
+    }
+    
+    /* SQL 결과 스타일 */
     .sql-result {
         background-color: #f0f2f6;
         padding: 1rem;
         border-radius: 0.5rem;
         border-left: 4px solid #4CAF50;
         margin: 1rem 0;
+        font-family: 'Courier New', monospace;
     }
+    
     .error-message {
         background-color: #ffebee;
         padding: 1rem;
         border-radius: 0.5rem;
         border-left: 4px solid #f44336;
         margin: 1rem 0;
+    }
+    
+    /* 스크롤바 스타일 */
+    .chat-messages::-webkit-scrollbar {
+        width: 6px;
+    }
+    
+    .chat-messages::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+    }
+    
+    .chat-messages::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+    }
+    
+    .chat-messages::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+    }
+    
+    /* 반응형 디자인 */
+    @media (max-width: 768px) {
+        .chat-messages {
+            max-height: calc(100vh - 160px);
+            padding: 0.5rem 0;
+        }
+        
+        .chat-input-container {
+            padding: 0.75rem;
+        }
+        
+        .chat-message {
+            max-width: 90%;
+            font-size: 0.9rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -228,71 +412,84 @@ col1, col2 = st.columns([3, 1])
 with col1:
     st.header("💬 질문하기")
     
-    # 채팅 메시지 표시
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-            
-            # SQL 결과가 있으면 표시
-            if "sql_queries" in message and message["sql_queries"]:
-                st.markdown("**실행된 SQL 쿼리:**")
-                for i, sql in enumerate(message["sql_queries"], 1):
-                    st.code(sql, language="sql")
+    # 채팅 컨테이너 생성
+    chat_container = st.container()
     
-    # 사용자 입력
-    if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."):
-        # 사용자 메시지 추가
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    with chat_container:
+        # 채팅 메시지 영역
+        messages_container = st.container()
+        messages_container.markdown('<div class="chat-messages" id="chat-messages">', unsafe_allow_html=True)
         
-        with st.chat_message("user"):
-            st.write(prompt)
+        # 채팅 메시지 표시 (역순으로 최신 메시지가 아래에)
+        for i, message in enumerate(st.session_state.messages):
+            with messages_container:
+                with st.chat_message(message["role"]):
+                    st.write(message["content"])
+                    
+                    # SQL 결과가 있으면 표시
+                    if "sql_queries" in message and message["sql_queries"]:
+                        with st.expander("실행된 SQL 쿼리", expanded=False):
+                            for j, sql in enumerate(message["sql_queries"], 1):
+                                st.code(sql, language="sql")
         
-        # AI 응답 생성 (스트리밍)
-        with st.chat_message("assistant"):
-            response_placeholder = st.empty()
+        messages_container.markdown('</div>', unsafe_allow_html=True)
+    
+    # 빈 공간 추가 (입력창과의 간격)
+    st.markdown('<div style="height: 100px;"></div>', unsafe_allow_html=True)
+
+# 입력창을 화면 하단에 고정 (사이드바 외부)
+st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
+
+# 사용자 입력
+if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."):
+    # 사용자 메시지 추가
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # AI 응답 생성 및 메시지 추가
+    with st.spinner("답변을 생성하는 중..."):
+        try:
+            # 스트리밍 API 호출
             full_response = ""
+            response_placeholder = st.empty()
             
-            try:
-                for token in call_agent_api_stream(prompt):
-                    full_response += token
-                    response_placeholder.write(full_response + "▌")  # 커서 효과
+            for token in call_agent_api_stream(prompt):
+                full_response += token
+                response_placeholder.write(f"AI: {full_response}▌")  # 임시 표시
+            
+            # 최종 응답을 세션에 저장
+            st.session_state.messages.append({
+                "role": "assistant", 
+                "content": full_response
+            })
+            
+            # 화면 새로고침을 위해 rerun
+            st.rerun()
+            
+        except Exception as e:
+            # 스트리밍 실패 시 일반 API 호출
+            st.error(f"스트리밍 연결 실패: {str(e)}")
+            response = call_agent_api(prompt)
+            
+            if response.get("success"):
+                message_content = response.get("message", "응답을 받았습니다.")
+                sql_queries = response.get("sql_queries", [])
                 
-                response_placeholder.write(full_response)  # 최종 응답
-                
-                # 메시지 저장
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": full_response
+                    "content": message_content,
+                    "sql_queries": sql_queries
                 })
-            except Exception as e:
-                # 스트리밍 실패 시 일반 API 호출
-                st.error(f"스트리밍 연결 실패: {str(e)}")
-                with st.spinner("답변을 생성하는 중..."):
-                    response = call_agent_api(prompt)
-                    
-                    if response.get("success"):
-                        message_content = response.get("message", "응답을 받았습니다.")
-                        st.write(message_content)
-                        
-                        # SQL 쿼리 표시
-                        sql_queries = response.get("sql_queries", [])
-                        if sql_queries:
-                            st.markdown("**실행된 SQL 쿼리:**")
-                            for i, sql in enumerate(sql_queries, 1):
-                                st.code(sql, language="sql")
-                        
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": message_content,
-                            "sql_queries": sql_queries
-                        })
-                    else:
-                        error_msg = response.get("error_message", "알 수 없는 오류가 발생했습니다.")
-                        st.error(f"오류: {error_msg}")
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": f"죄송합니다. 오류가 발생했습니다: {error_msg}"
-                        })
+            else:
+                error_msg = response.get("error_message", "알 수 없는 오류가 발생했습니다.")
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"죄송합니다. 오류가 발생했습니다: {error_msg}"
+                })
+            
+            # 화면 새로고침
+            st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)  # chat-input-container div 닫기
 
 with col2:
     st.header("⚙️ 설정")
