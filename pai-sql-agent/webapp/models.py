@@ -9,11 +9,24 @@ class QueryRequest(BaseModel):
     stream: bool = False
 
 
+class ToolInfo(BaseModel):
+    """사용된 도구 정보"""
+    tool_name: str
+    tool_function: str
+    tool_description: str
+    arguments: Dict[str, Any]
+    execution_order: int
+    success: bool
+    result_preview: Optional[str] = None
+    error_message: Optional[str] = None
+
+
 class QueryResponse(BaseModel):
     success: bool
     message: str
     sql_queries: List[str] = []
     results: List[Dict[str, Any]] = []
+    used_tools: List[ToolInfo] = []  # 사용된 도구 정보
     session_id: Optional[str] = None
     processing_time: Optional[float] = None
     error_message: Optional[str] = None

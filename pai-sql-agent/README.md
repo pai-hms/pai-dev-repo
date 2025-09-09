@@ -82,7 +82,7 @@ curl -X POST "http://localhost:8000/api/agent/query" \
 ## 기술 스택
 
 - AI Framework: LangGraph, LangChain
-- LLM: OpenAI GPT-4
+- LLM: OpenAI GPT-4o-mini
 - Database: PostgreSQL
 - Web Framework: FastAPI, Streamlit
 - Package Manager: uv

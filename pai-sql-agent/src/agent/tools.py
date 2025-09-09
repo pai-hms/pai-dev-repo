@@ -26,9 +26,9 @@ class SQLQueryValidator:
     
     # 허용된 테이블들
     ALLOWED_TABLES = [
-        'population_stats', 'household_stats', 'house_stats', 'company_stats',
-        'farm_household_stats', 'forestry_household_stats', 'fishery_household_stats',
-        'household_member_stats', 'crawl_logs'
+        'population_stats', 'population_search_stats', 'household_stats', 'house_stats', 
+        'company_stats', 'farm_household_stats', 'forestry_household_stats', 
+        'fishery_household_stats', 'household_member_stats', 'industry_code_stats'
     ]
     
     @classmethod
@@ -199,7 +199,8 @@ async def get_available_tables() -> str:
         
         # 테이블 설명 매핑
         table_descriptions = {
-            'population_stats': '인구 통계 (2015-2023)',
+            'population_stats': '총조사 주요지표 (2015-2023)',
+            'population_search_stats': '인구통계 데이터',
             'household_stats': '가구 통계 (2015-2023)',
             'house_stats': '주택 통계 (2015-2023)',
             'company_stats': '사업체 통계 (2000-2023)',
@@ -207,7 +208,7 @@ async def get_available_tables() -> str:
             'forestry_household_stats': '임가 통계 (농림어업총조사)',
             'fishery_household_stats': '어가 통계 (농림어업총조사)',
             'household_member_stats': '가구원 통계 (농림어업총조사)',
-            'crawl_logs': '데이터 수집 로그'
+            'industry_code_stats': '산업분류별 통계 데이터'
         }
         
         lines = ["사용 가능한 테이블 목록:", ""]

@@ -42,7 +42,8 @@ async def get_table_info(
         
         # 테이블 설명 매핑
         descriptions = {
-            'population_stats': '인구 통계 데이터 (2015-2023)',
+            'population_stats': '총조사 주요지표 (2015-2023)',
+            'population_search_stats': '인구통계 데이터',
             'household_stats': '가구 통계 데이터 (2015-2023)',
             'house_stats': '주택 통계 데이터 (2015-2023)',
             'company_stats': '사업체 통계 데이터 (2000-2023)',
@@ -50,7 +51,7 @@ async def get_table_info(
             'forestry_household_stats': '임가 통계 데이터',
             'fishery_household_stats': '어가 통계 데이터',
             'household_member_stats': '가구원 통계 데이터',
-            'crawl_logs': '데이터 수집 로그'
+            'industry_code_stats': '산업분류별 통계 데이터'
         }
         
         return TableInfoResponse(

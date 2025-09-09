@@ -197,6 +197,8 @@ class SQLAgentService:
             
             # 그래프 스트리밍 실행 - messages 모드로 LLM 토큰 스트리밍
             agent = await self._get_agent()
+            final_state = None
+            
             async for message_chunk, metadata in agent.astream(
                 initial_state, 
                 config=config,
@@ -209,6 +211,24 @@ class SQLAgentService:
                         "content": message_chunk.content,
                         "metadata": metadata
                     }
+            
+            # 스트리밍 완료 후 최종 상태 조회 (도구 정보 포함)
+            try:
+                final_state = await agent.aget_state(config)
+                if final_state and hasattr(final_state, 'values'):
+                    state_values = final_state.values
+                    
+                    # 최종 상태 정보 전달 (도구 정보 포함)
+                    yield {
+                        "type": "final_state",
+                        "content": {
+                            "used_tools": state_values.get("used_tools", []),
+                            "sql_results": state_values.get("sql_results", []),
+                            "is_complete": state_values.get("is_complete", True)
+                        }
+                    }
+            except Exception as state_error:
+                logger.warning(f"최종 상태 조회 실패: {str(state_error)}")
                 
         except Exception as e:
             logger.error(f"스트리밍 쿼리 실행 중 오류: {str(e)}")

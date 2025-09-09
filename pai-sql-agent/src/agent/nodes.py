@@ -27,6 +27,7 @@ class AgentState:
         self.max_iterations: int = 10
         self.is_complete: bool = False
         self.error_message: Optional[str] = None
+        self.used_tools: List[Dict[str, Any]] = []  # 사용된 도구 추적
     
     def add_message(self, message: BaseMessage) -> None:
         """메시지 추가"""
@@ -120,10 +121,25 @@ class SQLAgentNodes:
                     )
                     continue
                 
+                # 도구 실행 시작 로깅
+                logger.info(f"🔄 도구 실행 시작: {tool_name} | 파라미터: {tool_args}")
+                
                 # 도구 실행
                 try:
                     # LangChain 도구는 항상 ainvoke 사용
                     result = await tool.ainvoke(tool_args)
+                    
+                    # 도구 사용 정보 추적
+                    tool_info = {
+                        "tool_name": tool_name,
+                        "tool_function": tool.name,
+                        "tool_description": tool.description,
+                        "arguments": tool_args,
+                        "result_preview": str(result)[:200] + "..." if len(str(result)) > 200 else str(result),
+                        "execution_order": len(state.used_tools) + 1,
+                        "success": True
+                    }
+                    state.used_tools.append(tool_info)
                     
                     # SQL 결과인 경우 별도 저장
                     if tool_name == "execute_sql_query":
@@ -134,11 +150,24 @@ class SQLAgentNodes:
                         ToolMessage(content=str(result), tool_call_id=tool_id)
                     )
                     
-                    logger.info(f"도구 실행 완료: {tool_name}")
+                    logger.info(f"✅ 도구 실행 완료: {tool_name} | 결과: 성공")
                     
                 except Exception as tool_error:
                     error_msg = f"도구 실행 중 오류: {str(tool_error)}"
                     logger.error(error_msg)
+                    
+                    # 실패한 도구 정보도 추적
+                    tool_info = {
+                        "tool_name": tool_name,
+                        "tool_function": tool.name,
+                        "tool_description": tool.description,
+                        "arguments": tool_args,
+                        "error_message": error_msg,
+                        "execution_order": len(state.used_tools) + 1,
+                        "success": False
+                    }
+                    state.used_tools.append(tool_info)
+                    
                     state.add_message(
                         ToolMessage(content=error_msg, tool_call_id=tool_id)
                     )

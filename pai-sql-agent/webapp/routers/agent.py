@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage
 
-from webapp.models import QueryRequest, QueryResponse, StreamChunk
+from webapp.models import QueryRequest, QueryResponse, StreamChunk, ToolInfo
 from src.agent.graph import get_sql_agent_service
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ async def query_sql_agent(request: QueryRequest) -> QueryResponse:
         messages = result.get("messages", [])
         final_message = ""
         sql_queries = result.get("sql_results", [])
+        used_tools_data = result.get("used_tools", [])
         
         # 마지막 AI 메시지 찾기
         for msg in reversed(messages):
@@ -52,10 +53,26 @@ async def query_sql_agent(request: QueryRequest) -> QueryResponse:
                 final_message = str(msg.content)
                 break
         
+        # 도구 정보를 ToolInfo 모델로 변환
+        used_tools = []
+        for tool_data in used_tools_data:
+            tool_info = ToolInfo(
+                tool_name=tool_data.get("tool_name", ""),
+                tool_function=tool_data.get("tool_function", ""),
+                tool_description=tool_data.get("tool_description", ""),
+                arguments=tool_data.get("arguments", {}),
+                execution_order=tool_data.get("execution_order", 0),
+                success=tool_data.get("success", False),
+                result_preview=tool_data.get("result_preview"),
+                error_message=tool_data.get("error_message")
+            )
+            used_tools.append(tool_info)
+        
         return QueryResponse(
             success=True,
             message=final_message or "쿼리가 성공적으로 처리되었습니다.",
             sql_queries=sql_queries,
+            used_tools=used_tools,
             session_id=session_id,
             processing_time=processing_time
         )
@@ -85,7 +102,9 @@ async def stream_sql_agent(request: QueryRequest):
             # 에이전트 서비스 가져오기
             agent_service = get_sql_agent_service(enable_checkpointer=True)
             
-            # LLM 토큰별 스트리밍 실행
+            # LLM 토큰별 + 도구 실행 상태 스트리밍
+            final_state_info = None
+            
             async for chunk in agent_service.stream_query(request.question, session_id):
                 if chunk.get("type") == "token":
                     # LLM 토큰을 바로 전달
@@ -94,6 +113,9 @@ async def stream_sql_agent(request: QueryRequest):
                         content=chunk["content"]
                     )
                     yield f"data: {token_chunk.model_dump_json()}\n\n"
+                elif chunk.get("type") == "final_state":
+                    # 최종 상태 정보 저장 (나중에 사용)
+                    final_state_info = chunk["content"]
                 elif chunk.get("type") == "error":
                     # 에러 처리
                     error_chunk = StreamChunk(
@@ -102,6 +124,29 @@ async def stream_sql_agent(request: QueryRequest):
                     )
                     yield f"data: {error_chunk.model_dump_json()}\n\n"
                     return
+            
+            # 최종 상태 정보 전달 (도구 정보 포함)
+            if final_state_info:
+                # 사용된 도구들을 개별적으로 스트리밍
+                used_tools = final_state_info.get("used_tools", [])
+                for tool in used_tools:
+                    tool_chunk = StreamChunk(
+                        type="tool_execution",
+                        content=json.dumps({
+                            "tool_name": tool.get("tool_function", "Unknown"),
+                            "description": tool.get("tool_description", ""),
+                            "arguments": tool.get("arguments", {}),
+                            "status": "completed" if tool.get("success") else "failed"
+                        })
+                    )
+                    yield f"data: {tool_chunk.model_dump_json()}\n\n"
+                
+                # 최종 상태 정보도 전달
+                state_chunk = StreamChunk(
+                    type="final_state",
+                    content=json.dumps(final_state_info)
+                )
+                yield f"data: {state_chunk.model_dump_json()}\n\n"
             
             # 완료 메시지
             complete_chunk = StreamChunk(

@@ -3,7 +3,7 @@ import requests
 import json
 import time
 import os
-from typing import Dict, Any, List, Generator  # Generator 추가
+from typing import Dict, Any, List, Generator
 
 # 페이지 설정
 st.set_page_config(
@@ -296,8 +296,8 @@ def call_agent_api(question: str, stream: bool = False) -> Dict[str, Any]:
         }
 
 
-def call_agent_api_stream(question: str) -> Generator[str, None, None]:
-    """Agent API 스트리밍 호출 - Generator로 변경"""
+def call_agent_api_stream(question: str) -> Generator[Dict[str, Any], None, None]:
+    """Agent API 스트리밍 호출 - 완전한 응답 정보 반환"""
     try:
         url = f"{API_BASE_URL}/api/agent/query/stream"
         payload = {
@@ -312,15 +312,24 @@ def call_agent_api_stream(question: str) -> Generator[str, None, None]:
             if line and line.startswith(b'data: '):
                 data = json.loads(line[6:])  # "data: " 제거
                 if data.get("type") == "token":
-                    yield data["content"]
+                    yield {"type": "token", "content": data["content"]}
+                elif data.get("type") == "final_state":
+                    # 최종 상태 정보 반환 (도구 정보 포함)
+                    final_state = json.loads(data["content"])
+                    yield {"type": "final_state", "content": final_state}
+                elif data.get("type") == "tool_execution":
+                    # 도구 실행 정보
+                    tool_data = json.loads(data["content"])
+                    yield {"type": "tool_execution", "content": tool_data}
                 elif data.get("type") == "complete":
+                    yield {"type": "complete", "content": ""}
                     break
                 elif data.get("type") == "error":
-                    yield f"\n오류: {data['content']}"
+                    yield {"type": "error", "content": data["content"]}
                     break
                     
     except Exception as e:
-        yield f"\n오류: {str(e)}"
+        yield {"type": "error", "content": str(e)}
 
 
 def get_tables() -> List[str]:
@@ -363,21 +372,8 @@ with st.sidebar:
     except Exception as e:
         st.error(f"🔴 API 서버에 연결할 수 없습니다: {str(e)}")
     
-    # 테이블 목록
-    with st.expander("테이블 목록", expanded=True):
-        tables = get_tables()
-        if tables:
-            for table in tables:
-                if st.button(f"📋 {table}", key=f"table_{table}"):
-                    table_info = get_table_info(table)
-                    if table_info:
-                        st.session_state.selected_table = table_info
-        else:
-            st.warning("테이블을 불러올 수 없습니다.")
-
-    
-    # 도움말
-    with st.expander("💡 사용 팁"):
+    # 도움말 (위로 이동)
+    with st.expander("💡 사용 팁", expanded=True):
         st.markdown("""
         **인구 통계 질문:**
         - 2023년 서울특별시의 인구는?
@@ -406,6 +402,32 @@ with st.sidebar:
         - 시도/시군구/읍면동 단위 데이터
         """)
 
+    # 테이블 목록 (아래로 이동)
+    with st.expander("📋 테이블 목록", expanded=False):
+        tables = get_tables()
+        if tables:
+            selected_table = st.selectbox(
+                "테이블 선택:", 
+                ["선택하세요..."] + tables,
+                key="table_selector"
+            )
+            
+            if selected_table != "선택하세요...":
+                table_info = get_table_info(selected_table)
+                if table_info:
+                    st.write(f"**{selected_table}**")
+                    st.caption(table_info.get('description', '설명 없음'))
+                    
+                    with st.expander("컬럼 정보", expanded=False):
+                        for col in table_info.get('columns', [])[:5]:  # 처음 5개만 표시
+                            nullable = "NULL 허용" if col.get('is_nullable') == 'YES' else "NOT NULL"
+                            st.text(f"• {col['column_name']}: {col['data_type']}")
+                        
+                        if len(table_info.get('columns', [])) > 5:
+                            st.caption(f"... 및 {len(table_info.get('columns', [])) - 5}개 컬럼 더")
+        else:
+            st.warning("테이블을 불러올 수 없습니다.")
+
 # 메인 채팅 영역
 col1, col2 = st.columns([3, 1])
 
@@ -426,9 +448,16 @@ with col1:
                 with st.chat_message(message["role"]):
                     st.write(message["content"])
                     
+                    # 사용된 도구 정보 표시 (assistant 메시지에서만)
+                    if message["role"] == "assistant" and "used_tools" in message and message["used_tools"]:
+                        with st.expander("🛠️ 사용된 AI 도구", expanded=False):
+                            tool_names = [tool.get("tool_name", "Unknown") for tool in message["used_tools"]]
+                            for i, tool_name in enumerate(tool_names, 1):
+                                st.write(f"{i}. **{tool_name}**")
+                    
                     # SQL 결과가 있으면 표시
                     if "sql_queries" in message and message["sql_queries"]:
-                        with st.expander("실행된 SQL 쿼리", expanded=False):
+                        with st.expander("📄 실행된 SQL 쿼리", expanded=False):
                             for j, sql in enumerate(message["sql_queries"], 1):
                                 st.code(sql, language="sql")
         
@@ -451,19 +480,67 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             # 스트리밍 API 호출
             full_response = ""
             response_placeholder = st.empty()
+            final_state_data = None
             
-            for token in call_agent_api_stream(prompt):
-                full_response += token
-                response_placeholder.write(f"AI: {full_response}▌")  # 임시 표시
+            error_occurred = False
+            tool_status_placeholder = st.empty()
             
-            # 최종 응답을 세션에 저장
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": full_response
-            })
+            for chunk in call_agent_api_stream(prompt):
+                if chunk["type"] == "token":
+                    full_response += chunk["content"]
+                    response_placeholder.write(f"AI: {full_response}▌")  # 임시 표시
+                elif chunk["type"] == "final_state":
+                    final_state_data = chunk["content"]
+                elif chunk["type"] == "tool_execution":
+                    # 도구 실행 정보 실시간 표시
+                    tool_info = chunk["content"]
+                    tool_name = tool_info.get("tool_name", "Unknown")
+                    tool_desc = tool_info.get("description", "")
+                    tool_args = tool_info.get("arguments", {})
+                    tool_status = tool_info.get("status", "completed")
+                    
+                    # 실시간 도구 실행 정보 표시 (함수명 포함)
+                    with tool_status_placeholder.container():
+                        if tool_status == "completed":
+                            st.success(f"🛠️ **{tool_name}** 실행 완료")
+                        else:
+                            st.error(f"❌ **{tool_name}** 실행 실패")
+                        
+                        # 간결한 정보 표시 (함수명 강조)
+                        st.caption(f"함수: `{tool_name}` | {tool_desc}")
+                        
+                        with st.expander("상세 정보", expanded=False):
+                            st.write(f"**함수명:** `{tool_name}`")
+                            st.write(f"**설명:** {tool_desc}")
+                            if tool_args:
+                                st.write("**파라미터:**")
+                                st.json(tool_args)
+                
+                elif chunk["type"] == "error":
+                    response_placeholder.error(f"오류: {chunk['content']}")
+                    error_occurred = True
+                    break
             
-            # 화면 새로고침을 위해 rerun
-            st.rerun()
+            # 처리 완료 후 도구 상태 정리
+            tool_status_placeholder.empty()
+            
+            # 에러가 발생하지 않은 경우에만 메시지 저장
+            if not error_occurred:
+                # 최종 응답을 세션에 저장 (도구 정보 포함)
+                assistant_message = {
+                    "role": "assistant", 
+                    "content": full_response
+                }
+                
+                # 최종 상태 정보가 있으면 추가
+                if final_state_data:
+                    assistant_message["used_tools"] = final_state_data.get("used_tools", [])
+                    assistant_message["sql_queries"] = final_state_data.get("sql_results", [])
+                
+                st.session_state.messages.append(assistant_message)
+                
+                # 화면 새로고침을 위해 rerun
+                st.rerun()
             
         except Exception as e:
             # 스트리밍 실패 시 일반 API 호출
@@ -473,11 +550,13 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             if response.get("success"):
                 message_content = response.get("message", "응답을 받았습니다.")
                 sql_queries = response.get("sql_queries", [])
+                used_tools = response.get("used_tools", [])
                 
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": message_content,
-                    "sql_queries": sql_queries
+                    "sql_queries": sql_queries,
+                    "used_tools": used_tools
                 })
             else:
                 error_msg = response.get("error_message", "알 수 없는 오류가 발생했습니다.")
@@ -531,17 +610,6 @@ with col2:
     except Exception as e:
         st.write(f"🔴 시스템 상태를 확인할 수 없습니다: {str(e)}")
 
-# 선택된 테이블 정보 표시
-if hasattr(st.session_state, 'selected_table'):
-    with st.expander(f"📋 {st.session_state.selected_table['table_name']} 테이블 정보", expanded=True):
-        table_info = st.session_state.selected_table
-        
-        st.write(f"**설명:** {table_info.get('description', '설명 없음')}")
-        
-        st.write("**컬럼 정보:**")
-        for col in table_info.get('columns', []):
-            nullable = "NULL 허용" if col.get('is_nullable') == 'YES' else "NOT NULL"
-            st.write(f"• `{col['column_name']}`: {col['data_type']} ({nullable})")
 
 # 푸터
 st.markdown("---")
