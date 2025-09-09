@@ -25,11 +25,11 @@ docker-compose up -d --build
 # 완전 재빌드
 docker-compose down
 docker-compose build --no-cache
-docker-compose up -d
+docker-compose up
 
 # 종료 후 재실행
 docker-compose down
-docker-compose  up
+docker-compose up
 
 # streamlit app 재실행
 docker-compose restart streamlit app

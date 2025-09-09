@@ -27,7 +27,14 @@ logger = logging.getLogger(__name__)
 
 
 async def create_checkpointer():
-    """체크포인터 생성"""
+    """
+    PostgreSQL 체크포인터 생성 (비동기 방식)
+    
+    참고 문서에 따른 최적화된 구현:
+    - AsyncPostgresSaver 사용
+    - 컨텍스트 매니저 적용
+    - 자동 테이블 생성
+    """
     if not POSTGRES_AVAILABLE:
         logger.warning("PostgreSQL 체크포인터를 사용할 수 없습니다. MemorySaver를 사용합니다.")
         return MemorySaver()
@@ -35,14 +42,13 @@ async def create_checkpointer():
     try:
         settings = get_settings()
         
-        # DATABASE_URL 파싱
+        # DATABASE_URL을 PostgreSQL 체크포인터용으로 변환
+        # 예: postgresql://user:pass@host:port/db 형태로 변환
         db_url = settings.database_url
-        if db_url.startswith("postgresql://"):
-            db_url = db_url[13:]
         
-        # 비동기 연결 풀 생성
+        # 연결 풀 생성 (영속적 연결 풀)
         pool = AsyncConnectionPool(
-            conninfo=f"postgresql://{db_url}",
+            conninfo=db_url,
             max_size=20,
             kwargs={
                 "autocommit": True,
@@ -50,17 +56,23 @@ async def create_checkpointer():
             }
         )
         
+        # 풀 열기
+        await pool.open()
+        
         # AsyncPostgresSaver 생성
         checkpointer = AsyncPostgresSaver(pool)
         
-        # 테이블 자동 생성
+        # 테이블 자동 생성 (setup 호출)
         await checkpointer.setup()
         
         logger.info("PostgreSQL 체크포인터가 성공적으로 설정되었습니다.")
+        logger.info(f"Database URL: {db_url[:50]}...")
+        
         return checkpointer
         
     except Exception as e:
         logger.error(f"PostgreSQL 체크포인터 생성 실패: {e}")
+        logger.error(f"Database URL: {settings.database_url[:50]}...")
         logger.info("MemorySaver로 대체합니다.")
         return MemorySaver()
 
@@ -119,11 +131,12 @@ async def create_sql_agent(enable_checkpointer: bool = True) -> CompiledStateGra
 
 
 class SQLAgentService:
-    """SQL Agent 서비스"""
+    """SQL Agent 서비스 (영속성 관리 포함)"""
     
     def __init__(self, enable_checkpointer: bool = True):
         self.enable_checkpointer = enable_checkpointer
         self._agent = None
+        self._checkpointer = None
     
     async def _get_agent(self):
         """지연 초기화로 에이전트 생성"""
@@ -249,6 +262,12 @@ class SQLAgentService:
                 "content": f"스트리밍 실행 중 오류가 발생했습니다: {str(e)}"
             }
 
+    async def _get_checkpointer(self):
+        """체크포인터 인스턴스 반환"""
+        if self._checkpointer is None and self.enable_checkpointer:
+            self._checkpointer = await create_checkpointer()
+        return self._checkpointer
+
     async def get_chat_history(self, session_id: str) -> list:
         """채팅 기록 조회"""
         if not self.enable_checkpointer:
@@ -261,6 +280,76 @@ class SQLAgentService:
             return state.values.get("messages", [])
         except Exception as e:
             logger.error(f"채팅 기록 조회 중 오류: {str(e)}")
+            return []
+
+    async def get_state_history(self, session_id: str, limit: int = 10) -> list:
+        """상태 히스토리 조회 (최신 LangGraph 방식)"""
+        if not self.enable_checkpointer:
+            return []
+        
+        try:
+            config = {"configurable": {"thread_id": session_id}}
+            agent = await self._get_agent()
+            
+            # 최신 방식으로 상태 히스토리 조회
+            history = []
+            async for state in agent.aget_state_history(config, limit=limit):
+                history.append({
+                    "config": state.config,
+                    "values": state.values,
+                    "metadata": state.metadata,
+                    "created_at": state.created_at.isoformat() if state.created_at else None,
+                    "step": state.metadata.get("step", 0)
+                })
+            
+            return history
+        except Exception as e:
+            logger.error(f"상태 히스토리 조회 중 오류: {str(e)}")
+            return []
+
+    async def delete_thread(self, session_id: str) -> bool:
+        """세션(스레드) 삭제"""
+        if not self.enable_checkpointer:
+            return False
+        
+        try:
+            checkpointer = await self._get_checkpointer()
+            if checkpointer and hasattr(checkpointer, 'adelete_thread'):
+                await checkpointer.adelete_thread(session_id)
+                logger.info(f"세션 삭제 완료: {session_id}")
+                return True
+            else:
+                logger.warning("체크포인터에서 스레드 삭제를 지원하지 않습니다.")
+                return False
+        except Exception as e:
+            logger.error(f"세션 삭제 중 오류: {str(e)}")
+            return False
+
+    async def list_checkpoints(self, session_id: str, limit: int = 10) -> list:
+        """체크포인트 목록 조회"""
+        if not self.enable_checkpointer:
+            return []
+        
+        try:
+            checkpointer = await self._get_checkpointer()
+            if checkpointer and hasattr(checkpointer, 'alist'):
+                config = {"configurable": {"thread_id": session_id}}
+                
+                checkpoints = []
+                async for checkpoint_tuple in checkpointer.alist(config, limit=limit):
+                    checkpoints.append({
+                        "config": checkpoint_tuple.config,
+                        "checkpoint": checkpoint_tuple.checkpoint,
+                        "metadata": checkpoint_tuple.metadata,
+                        "parent_config": checkpoint_tuple.parent_config
+                    })
+                
+                return checkpoints
+            else:
+                logger.warning("체크포인터에서 체크포인트 목록 조회를 지원하지 않습니다.")
+                return []
+        except Exception as e:
+            logger.error(f"체크포인트 목록 조회 중 오류: {str(e)}")
             return []
 
 
