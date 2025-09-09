@@ -1,6 +1,6 @@
 import logging
 from typing import List
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from webapp.models import (
@@ -24,7 +24,7 @@ async def get_tables(session: AsyncSession = Depends(get_async_session)):
         return tables
     except Exception as e:
         logger.error(f"테이블 목록 조회 중 오류: {str(e)}")
-        raise HTTPException(status_code=500, detail="테이블 목록 조회에 실패했습니다")
+        return []  # 빈 목록 반환
 
 
 @router.get("/tables/{table_name}", response_model=TableInfoResponse)
@@ -38,7 +38,13 @@ async def get_table_info(
         schema_info = await db_service.get_table_schema(table_name)
         
         if not schema_info:
-            raise HTTPException(status_code=404, detail="테이블을 찾을 수 없습니다")
+            logger.warning(f"테이블 '{table_name}'을 찾을 수 없습니다")
+            # 빈 테이블 정보 반환
+            return TableInfoResponse(
+                table_name=table_name,
+                columns=[],
+                description="테이블을 찾을 수 없습니다"
+            )
         
         # 테이블 설명 매핑
         descriptions = {
@@ -60,11 +66,14 @@ async def get_table_info(
             description=descriptions.get(table_name, "설명 없음")
         )
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"테이블 정보 조회 중 오류: {str(e)}")
-        raise HTTPException(status_code=500, detail="테이블 정보 조회에 실패했습니다")
+        # 오류 시 빈 테이블 정보 반환
+        return TableInfoResponse(
+            table_name=table_name,
+            columns=[],
+            description="테이블 정보 조회에 실패했습니다"
+        )
 
 
 @router.post("/search/admin-area", response_model=AdminAreaSearchResponse)
@@ -117,7 +126,8 @@ async def search_admin_area(
         
     except Exception as e:
         logger.error(f"행정구역 검색 중 오류: {str(e)}")
-        raise HTTPException(status_code=500, detail="행정구역 검색에 실패했습니다")
+        # 빈 결과 반환
+        return AdminAreaSearchResponse(results=[])
 
 
 @router.get("/health", response_model=HealthResponse)

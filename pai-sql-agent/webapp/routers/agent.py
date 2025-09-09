@@ -3,7 +3,7 @@ import json
 import uuid
 import logging
 from typing import AsyncGenerator
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage
 
