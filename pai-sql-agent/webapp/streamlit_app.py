@@ -1,303 +1,51 @@
+"""
+간단하고 안정적인 Streamlit SQL Agent 앱
+복잡한 JavaScript와 CSS를 제거하고 기본 Streamlit 컴포넌트만 사용
+"""
 import streamlit as st
 import requests
 import json
-import time
 import os
+import uuid
 from typing import Dict, Any, List, Generator
 
-# 페이지 설정
+# 기본 페이지 설정
 st.set_page_config(
     page_title="PAI SQL Agent",
     page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="centered"
 )
-
-# 채팅 UI 개선을 위한 JavaScript
-st.markdown("""
-<script>
-// 채팅 메시지 자동 스크롤 및 입력창 고정
-function setupChatUI() {
-    // 채팅 메시지 영역 자동 스크롤 (하단으로)
-    function scrollToBottom() {
-        const chatMessages = document.getElementById('chat-messages');
-        if (chatMessages) {
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-    }
-    
-    // 입력창 고정 설정
-    function fixChatInput() {
-        const chatInput = document.querySelector('[data-testid="stChatInput"]');
-        if (chatInput && !chatInput.classList.contains('fixed')) {
-            const container = chatInput.closest('.stChatInput');
-            if (container) {
-                container.style.position = 'fixed';
-                container.style.bottom = '0';
-                container.style.left = '0';
-                container.style.right = '0';
-                container.style.zIndex = '1000';
-                container.style.backgroundColor = 'white';
-                container.style.borderTop = '2px solid #e9ecef';
-                container.style.padding = '1rem';
-                container.style.boxShadow = '0 -4px 12px rgba(0,0,0,0.1)';
-                chatInput.classList.add('fixed');
-            }
-        }
-    }
-    
-    // DOM 변화 감지
-    const observer = new MutationObserver((mutations) => {
-        let shouldScroll = false;
-        
-        mutations.forEach((mutation) => {
-            if (mutation.type === 'childList') {
-                // 새 메시지가 추가되었는지 확인
-                mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === 1 && 
-                        (node.querySelector('[data-testid="chat-message"]') || 
-                         node.matches('[data-testid="chat-message"]'))) {
-                        shouldScroll = true;
-                    }
-                });
-            }
-        });
-        
-        if (shouldScroll) {
-            setTimeout(scrollToBottom, 100);
-        }
-        
-        fixChatInput();
-    });
-    
-    // 페이지 전체 감시
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    
-    // 초기 설정
-    fixChatInput();
-    scrollToBottom();
-    
-    // 윈도우 리사이즈 시 재조정
-    window.addEventListener('resize', () => {
-        fixChatInput();
-        setTimeout(scrollToBottom, 100);
-    });
-}
-
-// 페이지 로드 후 실행
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', setupChatUI);
-} else {
-    setupChatUI();
-}
-
-// Streamlit의 rerun 후에도 실행
-setTimeout(setupChatUI, 500);
-</script>
-""", unsafe_allow_html=True)
-
-# 스타일 설정
-st.markdown("""
-<style>
-    /* 전체 레이아웃 */
-    .main {
-        padding-top: 1rem;
-        height: 100vh;
-        display: flex;
-        flex-direction: column;
-    }
-    
-    /* 채팅 컨테이너 */
-    .chat-container {
-        display: flex;
-        flex-direction: column;
-        height: calc(100vh - 120px);
-        max-height: calc(100vh - 120px);
-    }
-    
-    /* 채팅 메시지 영역 */
-    .chat-messages {
-        flex: 1;
-        overflow-y: auto;
-        padding: 1rem 0;
-        margin-bottom: 1rem;
-        max-height: calc(100vh - 200px);
-        min-height: 400px;
-    }
-    
-    /* 채팅 메시지 스타일 */
-    .chat-message {
-        margin-bottom: 1rem;
-        padding: 0.75rem 1rem;
-        border-radius: 1rem;
-        max-width: 80%;
-        word-wrap: break-word;
-    }
-    
-    .user-message {
-        background-color: #007bff;
-        color: white;
-        margin-left: auto;
-        text-align: right;
-    }
-    
-    .assistant-message {
-        background-color: #f8f9fa;
-        color: #333;
-        border: 1px solid #e9ecef;
-    }
-    
-    /* 입력창 영역 - 하단 고정 */
-    .chat-input-container {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: white;
-        border-top: 2px solid #e9ecef;
-        padding: 1rem;
-        z-index: 1000;
-        box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
-    }
-    
-    /* 사이드바 있는 경우 입력창 위치 조정 */
-    .main.main-content {
-        margin-bottom: 100px;
-    }
-    
-    /* SQL 결과 스타일 */
-    .sql-result {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #4CAF50;
-        margin: 1rem 0;
-        font-family: 'Courier New', monospace;
-    }
-    
-    .error-message {
-        background-color: #ffebee;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #f44336;
-        margin: 1rem 0;
-    }
-    
-    /* 스크롤바 스타일 */
-    .chat-messages::-webkit-scrollbar {
-        width: 6px;
-    }
-    
-    .chat-messages::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 3px;
-    }
-    
-    .chat-messages::-webkit-scrollbar-thumb {
-        background: #c1c1c1;
-        border-radius: 3px;
-    }
-    
-    .chat-messages::-webkit-scrollbar-thumb:hover {
-        background: #a8a8a8;
-    }
-    
-    /* 반응형 디자인 */
-    @media (max-width: 768px) {
-        .chat-messages {
-            max-height: calc(100vh - 160px);
-            padding: 0.5rem 0;
-        }
-        
-        .chat-input-container {
-            padding: 0.75rem;
-        }
-        
-        .chat-message {
-            max-width: 90%;
-            font-size: 0.9rem;
-        }
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # 세션 상태 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "session_id" not in st.session_state:
-    import uuid
     st.session_state.session_id = str(uuid.uuid4())
 
-# API 베이스 URL - 환경에 따라 동적 결정
+# API URL 설정
 def get_api_base_url():
     """환경에 따라 적절한 API URL 반환"""
-    # Docker 환경인지 확인
-    if os.path.exists('/.dockerenv'):
-        # Docker 컨테이너 내부에서 실행 중
-        return "http://app:8000"
-    else:
-        # 로컬 환경에서 실행 중
-        return "http://localhost:8000"
-
-API_BASE_URL = get_api_base_url()
-
-# API 연결 테스트 및 fallback
-def test_and_get_api_url():
-    """API 연결 테스트 후 작동하는 URL 반환"""
     urls_to_try = [
-        "http://app:8000",           # Docker 내부 네트워크
-        "http://localhost:8000",     # 로컬 호스트
-        "http://127.0.0.1:8000",     # 루프백
-        "http://host.docker.internal:8000"  # Docker Desktop의 경우
+        "http://app:8000",           # Docker 내부
+        "http://localhost:8000",     # 로컬
+        "http://127.0.0.1:8000"      # 루프백
     ]
     
     for url in urls_to_try:
         try:
-            response = requests.get(f"{url}/", timeout=3)
+            response = requests.get(f"{url}/", timeout=2)
             if response.status_code == 200:
                 return url
         except:
             continue
     
-    return "http://localhost:8000"  # 기본값
+    return "http://localhost:8000"
 
-# 실제 사용할 API URL
-API_BASE_URL = test_and_get_api_url()
+API_BASE_URL = get_api_base_url()
 
-
-def call_agent_api(question: str, stream: bool = False) -> Dict[str, Any]:
-    """Agent API 호출"""
-    try:
-        url = f"{API_BASE_URL}/api/agent/query"
-        if stream:
-            url += "/stream"
-        
-        payload = {
-            "question": question,
-            "session_id": st.session_state.session_id,
-            "stream": stream
-        }
-        
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        if stream:
-            return {"stream": response}
-        else:
-            return response.json()
-            
-    except requests.exceptions.RequestException as e:
-        return {
-            "success": False,
-            "error_message": f"API 호출 실패: {str(e)}"
-        }
-
-
+# API 호출 함수들
 def call_agent_api_stream(question: str) -> Generator[Dict[str, Any], None, None]:
-    """Agent API 스트리밍 호출 - 완전한 응답 정보 반환"""
+    """스트리밍 API 호출"""
     try:
         url = f"{API_BASE_URL}/api/agent/query/stream"
         payload = {
@@ -310,314 +58,199 @@ def call_agent_api_stream(question: str) -> Generator[Dict[str, Any], None, None
         
         for line in response.iter_lines():
             if line and line.startswith(b'data: '):
-                data = json.loads(line[6:])  # "data: " 제거
-                if data.get("type") == "token":
-                    yield {"type": "token", "content": data["content"]}
-                elif data.get("type") == "final_state":
-                    # 최종 상태 정보 반환 (도구 정보 포함)
-                    final_state = json.loads(data["content"])
-                    yield {"type": "final_state", "content": final_state}
-                elif data.get("type") == "tool_execution":
-                    # 도구 실행 정보
-                    tool_data = json.loads(data["content"])
-                    yield {"type": "tool_execution", "content": tool_data}
-                elif data.get("type") == "complete":
-                    yield {"type": "complete", "content": ""}
-                    break
-                elif data.get("type") == "error":
-                    yield {"type": "error", "content": data["content"]}
-                    break
+                try:
+                    data = json.loads(line[6:])
+                    yield data
+                except json.JSONDecodeError:
+                    continue
                     
     except Exception as e:
         yield {"type": "error", "content": str(e)}
 
-
-def get_tables() -> List[str]:
-    """테이블 목록 조회"""
+def call_agent_api(question: str) -> Dict[str, Any]:
+    """일반 API 호출"""
     try:
-        response = requests.get(f"{API_BASE_URL}/api/data/tables", timeout=10)
+        url = f"{API_BASE_URL}/api/agent/query"
+        payload = {
+            "question": question,
+            "session_id": st.session_state.session_id
+        }
+        
+        response = requests.post(url, json=payload, timeout=30)
         response.raise_for_status()
         return response.json()
-    except:
-        return []
+        
+    except Exception as e:
+        return {"success": False, "error_message": str(e)}
 
-
-def get_table_info(table_name: str) -> Dict[str, Any]:
-    """테이블 정보 조회"""
+def check_api_health() -> bool:
+    """API 서버 상태 확인"""
     try:
-        response = requests.get(f"{API_BASE_URL}/api/data/tables/{table_name}", timeout=10)
-        response.raise_for_status()
-        return response.json()
+        response = requests.get(f"{API_BASE_URL}/api/data/health", timeout=3)
+        return response.status_code == 200
     except:
-        return {}
+        return False
 
+# ====== UI 시작 ======
 
-
-# 메인 UI
+# 헤더
 st.title("🔍 PAI SQL Agent")
-st.subheader("한국 센서스 통계 데이터 AI 분석 도구")
+st.markdown("**한국 센서스 통계 데이터 AI 분석 도구**")
+
+# API 상태 표시
+if check_api_health():
+    st.success(f"🟢 API 서버 연결됨: {API_BASE_URL}")
+else:
+    st.error(f"🔴 API 서버 연결 실패: {API_BASE_URL}")
 
 # 사이드바
 with st.sidebar:
-    st.header("📊 데이터 정보")
+    st.header("📋 사용 가이드")
     
-    # 연결 상태 확인
-    st.write(f"**API 서버:** `{API_BASE_URL}`")
-    try:
-        health_response = requests.get(f"{API_BASE_URL}/api/data/health", timeout=5)
-        if health_response.status_code == 200:
-            st.success("🟢 API 서버 연결됨")
-        else:
-            st.error("🔴 API 서버 응답 오류")
-    except Exception as e:
-        st.error(f"🔴 API 서버에 연결할 수 없습니다: {str(e)}")
+    st.markdown("""
+    **인구 통계 질문 예시:**
+    - 2023년 서울특별시의 인구는?
+    - 경상북도에서 인구가 가장 많은 시군구는?
+    - 전국 시도별 평균 연령이 가장 높은 곳은?
     
-    # 도움말 (위로 이동)
-    with st.expander("💡 사용 팁", expanded=True):
-        st.markdown("""
-        **인구 통계 질문:**
-        - 2023년 서울특별시의 인구는?
-        - 경상북도에서 인구가 가장 많은 시군구는?
-        - 2020년 대비 2023년 인구 증가율이 높은 지역 상위 10곳
-        - 전국 시도별 평균 연령이 가장 높은 곳은?
-        
-        **가구/주택 통계 질문:**
-        - 서울특별시 구별 1인 가구 비율 순위
-        - 부산광역시의 아파트 수는?
-        - 전국에서 평균 가구원수가 가장 많은 지역은?
-        
-        **사업체 통계 질문:**
-        - 2023년 경기도의 사업체 수는?
-        - 종사자 수가 가장 많은 시도는?
-        - 포항시 남구와 북구의 사업체 수 비교
-        
-        **비교 분석 질문:**
-        - 수도권(서울/인천/경기) 인구 비교
-        - 영남권 주요 도시들의 인구밀도 순위
-        - 2015년과 2023년 전국 인구 변화
-        
-        **지원 데이터:**
-        - 인구/가구/주택/사업체 통계 (2015-2023)
-        - 농가/임가/어가 통계 (2000, 2005, 2010, 2015, 2020)
-        - 시도/시군구/읍면동 단위 데이터
-        """)
-
-    # 테이블 목록 (아래로 이동)
-    with st.expander("📋 테이블 목록", expanded=False):
-        tables = get_tables()
-        if tables:
-            selected_table = st.selectbox(
-                "테이블 선택:", 
-                ["선택하세요..."] + tables,
-                key="table_selector"
-            )
-            
-            if selected_table != "선택하세요...":
-                table_info = get_table_info(selected_table)
-                if table_info:
-                    st.write(f"**{selected_table}**")
-                    st.caption(table_info.get('description', '설명 없음'))
-                    
-                    with st.expander("컬럼 정보", expanded=False):
-                        for col in table_info.get('columns', [])[:5]:  # 처음 5개만 표시
-                            nullable = "NULL 허용" if col.get('is_nullable') == 'YES' else "NOT NULL"
-                            st.text(f"• {col['column_name']}: {col['data_type']}")
-                        
-                        if len(table_info.get('columns', [])) > 5:
-                            st.caption(f"... 및 {len(table_info.get('columns', [])) - 5}개 컬럼 더")
-        else:
-            st.warning("테이블을 불러올 수 없습니다.")
+    **가구/주택 통계:**
+    - 서울특별시 구별 1인 가구 비율 순위
+    - 전국에서 평균 가구원수가 가장 많은 지역은?
+    
+    **사업체 통계:**
+    - 2023년 경기도의 사업체 수는?
+    - 포항시 남구와 북구의 사업체 수 비교
+    """)
+    
+    st.markdown("---")
+    
+    # 채팅 기록 관리
+    if st.button("🗑️ 채팅 기록 삭제"):
+        st.session_state.messages = []
+        st.success("채팅 기록이 삭제되었습니다.")
+        st.rerun()
+    
+    if st.button("🔄 새 세션 시작"):
+        st.session_state.session_id = str(uuid.uuid4())
+        st.session_state.messages = []
+        st.success("새 세션이 시작되었습니다.")
+        st.rerun()
 
 # 메인 채팅 영역
-col1, col2 = st.columns([3, 1])
+st.markdown("---")
+st.subheader("💬 대화")
 
-with col1:
-    st.header("💬 질문하기")
-    
-    # 채팅 컨테이너 생성
-    chat_container = st.container()
-    
-    with chat_container:
-        # 채팅 메시지 영역
-        messages_container = st.container()
-        messages_container.markdown('<div class="chat-messages" id="chat-messages">', unsafe_allow_html=True)
+# 채팅 기록 표시
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
         
-        # 채팅 메시지 표시 (역순으로 최신 메시지가 아래에)
-        for i, message in enumerate(st.session_state.messages):
-            with messages_container:
-                with st.chat_message(message["role"]):
-                    st.write(message["content"])
-                    
-                    # 사용된 도구 정보 표시 (assistant 메시지에서만)
-                    if message["role"] == "assistant" and "used_tools" in message and message["used_tools"]:
-                        with st.expander("🛠️ 사용된 AI 도구", expanded=False):
-                            tool_names = [tool.get("tool_name", "Unknown") for tool in message["used_tools"]]
-                            for i, tool_name in enumerate(tool_names, 1):
-                                st.write(f"{i}. **{tool_name}**")
-                    
-                    # SQL 결과가 있으면 표시
-                    if "sql_queries" in message and message["sql_queries"]:
-                        with st.expander("📄 실행된 SQL 쿼리", expanded=False):
-                            for j, sql in enumerate(message["sql_queries"], 1):
-                                st.code(sql, language="sql")
-        
-        messages_container.markdown('</div>', unsafe_allow_html=True)
-    
-    # 빈 공간 추가 (입력창과의 간격)
-    st.markdown('<div style="height: 100px;"></div>', unsafe_allow_html=True)
-
-# 입력창을 화면 하단에 고정 (사이드바 외부)
-st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
+        # 도구 정보 표시 (있는 경우)
+        if message["role"] == "assistant" and "used_tools" in message:
+            if message["used_tools"]:
+                with st.expander("🛠️ 사용된 도구"):
+                    for i, tool in enumerate(message["used_tools"], 1):
+                        tool_name = tool.get("tool_name", "Unknown")
+                        success = tool.get("success", False)
+                        status = "✅" if success else "❌"
+                        st.write(f"{status} {i}. {tool_name}")
 
 # 사용자 입력
 if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."):
     # 사용자 메시지 추가
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # AI 응답 생성 및 메시지 추가
-    with st.spinner("답변을 생성하는 중..."):
+    # 사용자 메시지 표시
+    with st.chat_message("user"):
+        st.write(prompt)
+    
+    # AI 응답 생성
+    with st.chat_message("assistant"):
+        response_container = st.empty()
+        
         try:
-            # 스트리밍 API 호출
+            # 스트리밍 처리
             full_response = ""
-            response_placeholder = st.empty()
-            final_state_data = None
-            
+            used_tools = []
             error_occurred = False
-            tool_status_placeholder = st.empty()
             
-            for chunk in call_agent_api_stream(prompt):
-                print(f"[DEBUG] 받은 청크: {chunk}")  # 디버그 로그
-                if chunk["type"] == "token":
-                    full_response += chunk["content"]
-                    response_placeholder.write(f"AI: {full_response}▌")  # 임시 표시
-                elif chunk["type"] == "final_state":
-                    final_state_data = chunk["content"]
-                elif chunk["type"] == "tool_execution":
-                    # 도구 실행 정보 실시간 표시
-                    tool_info = chunk["content"]
-                    tool_name = tool_info.get("tool_name", "Unknown")
-                    tool_desc = tool_info.get("description", "")
-                    tool_args = tool_info.get("arguments", {})
-                    tool_status = tool_info.get("status", "completed")
+            with st.spinner("답변을 생성하는 중..."):
+                for chunk in call_agent_api_stream(prompt):
+                    if chunk.get("type") == "token":
+                        full_response += chunk["content"]
+                        response_container.write(full_response + "▌")
                     
-                    # 실시간 도구 실행 정보 표시 (함수명 포함)
-                    with tool_status_placeholder.container():
-                        if tool_status == "completed":
-                            st.success(f"🛠️ **{tool_name}** 실행 완료")
-                        else:
-                            st.error(f"❌ **{tool_name}** 실행 실패")
-                        
-                        # 간결한 정보 표시 (함수명 강조)
-                        st.caption(f"함수: `{tool_name}` | {tool_desc}")
-                        
-                        with st.expander("상세 정보", expanded=False):
-                            st.write(f"**함수명:** `{tool_name}`")
-                            st.write(f"**설명:** {tool_desc}")
-                            if tool_args:
-                                st.write("**파라미터:**")
-                                st.json(tool_args)
+                    elif chunk.get("type") == "tool_execution":
+                        tool_info = chunk["content"]
+                        tool_name = tool_info.get("tool_name", "Unknown")
+                        st.info(f"🛠️ 도구 실행 중: {tool_name}")
+                    
+                    elif chunk.get("type") == "final_state":
+                        final_state = json.loads(chunk["content"]) if isinstance(chunk["content"], str) else chunk["content"]
+                        used_tools = final_state.get("used_tools", [])
+                    
+                    elif chunk.get("type") == "error":
+                        st.error(f"오류: {chunk['content']}")
+                        error_occurred = True
+                        break
+            
+            # 최종 응답 표시
+            if not error_occurred and full_response:
+                response_container.write(full_response)
                 
-                elif chunk["type"] == "error":
-                    response_placeholder.error(f"오류: {chunk['content']}")
-                    error_occurred = True
-                    break
-            
-            # 처리 완료 후 도구 상태 정리
-            tool_status_placeholder.empty()
-            
-            # 에러가 발생하지 않은 경우에만 메시지 저장
-            if not error_occurred:
-                print(f"[DEBUG] 스트리밍 완료. 최종 응답 길이: {len(full_response)}")  # 디버그 로그
-                # 최종 응답을 세션에 저장 (도구 정보 포함)
+                # 메시지 저장
                 assistant_message = {
-                    "role": "assistant", 
-                    "content": full_response
-                }
-                
-                # 최종 상태 정보가 있으면 추가
-                if final_state_data:
-                    assistant_message["used_tools"] = final_state_data.get("used_tools", [])
-                    assistant_message["sql_queries"] = final_state_data.get("sql_results", [])
-                
-                st.session_state.messages.append(assistant_message)
-                print(f"[DEBUG] 메시지 저장 완료. 총 메시지 수: {len(st.session_state.messages)}")  # 디버그 로그
-                
-                # 최종 응답 표시 (rerun 대신)
-                response_placeholder.write(f"AI: {full_response}")
-            
-        except Exception as e:
-            # 스트리밍 실패 시 일반 API 호출
-            st.error(f"스트리밍 연결 실패: {str(e)}")
-            response = call_agent_api(prompt)
-            
-            if response.get("success"):
-                message_content = response.get("message", "응답을 받았습니다.")
-                sql_queries = response.get("sql_queries", [])
-                used_tools = response.get("used_tools", [])
-                
-                st.session_state.messages.append({
                     "role": "assistant",
-                    "content": message_content,
-                    "sql_queries": sql_queries,
+                    "content": full_response,
                     "used_tools": used_tools
-                })
-            else:
-                error_msg = response.get("error_message", "알 수 없는 오류가 발생했습니다.")
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"죄송합니다. 오류가 발생했습니다: {error_msg}"
-                })
+                }
+                st.session_state.messages.append(assistant_message)
+                
+                # 도구 정보 표시
+                if used_tools:
+                    with st.expander("🛠️ 사용된 도구"):
+                        for i, tool in enumerate(used_tools, 1):
+                            tool_name = tool.get("tool_name", "Unknown")
+                            success = tool.get("success", False)
+                            status = "✅" if success else "❌"
+                            st.write(f"{status} {i}. {tool_name}")
             
-            # 화면 새로고침
-            st.rerun()
-
-st.markdown('</div>', unsafe_allow_html=True)  # chat-input-container div 닫기
-
-with col2:
-    st.header("⚙️ 설정")
-    
-    # 채팅 히스토리 관리
-    if st.button("🗑️ 채팅 기록 삭제"):
-        st.session_state.messages = []
-        st.success("채팅 기록이 삭제되었습니다.")
-    
-    # 새 세션 시작
-    if st.button("🔄 새 세션 시작"):
-        import uuid
-        st.session_state.session_id = str(uuid.uuid4())
-        st.session_state.messages = []
-        st.success("새 세션이 시작되었습니다.")
-    
-    # 시스템 상태
-    st.subheader("📡 시스템 상태")
-    try:
-        health_response = requests.get(f"{API_BASE_URL}/api/data/health", timeout=5)
-        if health_response.status_code == 200:
-            health_data = health_response.json()
-            
-            status_color = {
-                "healthy": "🟢",
-                "degraded": "🟡", 
-                "unhealthy": "🔴"
-            }.get(health_data.get("status", "unhealthy"), "🔴")
-            
-            st.write(f"{status_color} 전체 상태: {health_data.get('status', 'unknown')}")
-            
-            db_status = "🟢 연결됨" if health_data.get("database_connected") else "🔴 연결 실패"
-            st.write(f"데이터베이스: {db_status}")
-            
-            api_status = "🟢 연결됨" if health_data.get("sgis_api_connected") else "🔴 연결 실패"
-            st.write(f"SGIS API: {api_status}")
-        else:
-            st.write("🔴 API 서버에 연결할 수 없습니다.")
-    except Exception as e:
-        st.write(f"🔴 시스템 상태를 확인할 수 없습니다: {str(e)}")
-
+            elif not full_response and not error_occurred:
+                # 스트리밍 실패시 일반 API 시도
+                st.info("스트리밍 연결 실패, 일반 API로 재시도...")
+                response = call_agent_api(prompt)
+                
+                if response.get("success"):
+                    content = response.get("message", "응답을 받았습니다.")
+                    response_container.write(content)
+                    
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": content,
+                        "used_tools": response.get("used_tools", [])
+                    })
+                else:
+                    error_msg = response.get("error_message", "알 수 없는 오류")
+                    response_container.error(f"오류: {error_msg}")
+                    
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": f"죄송합니다. 오류가 발생했습니다: {error_msg}",
+                        "used_tools": []
+                    })
+        
+        except Exception as e:
+            response_container.error(f"예상치 못한 오류: {str(e)}")
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": f"죄송합니다. 예상치 못한 오류가 발생했습니다: {str(e)}",
+                "used_tools": []
+            })
 
 # 푸터
 st.markdown("---")
 st.markdown(
-    "<div style='text-align: center; color: #666;'>"
+    "<div style='text-align: center; color: #666; font-size: 0.8em;'>"
     "PAI SQL Agent v1.0.0 | LangGraph + PostgreSQL + SGIS API"
     "</div>",
     unsafe_allow_html=True
