@@ -282,10 +282,291 @@ async def search_administrative_area(search_term: str) -> str:
         return f"행정구역 검색 중 오류가 발생했습니다: {str(e)}"
 
 
+@tool
+async def semantic_search(query: str, limit: int = 5) -> str:
+    """
+    의미 검색을 통해 관련 통계 데이터나 문서를 찾습니다.
+    
+    Args:
+        query: 검색할 질문이나 키워드
+        limit: 반환할 결과 개수 (기본값: 5)
+    
+    Returns:
+        유사한 문서들과 관련 정보
+    """
+    try:
+        from langchain_openai import OpenAIEmbeddings
+        from src.config.settings import get_settings
+        
+        settings = get_settings()
+        
+        # OpenAI 임베딩 생성
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            openai_api_key=settings.openai_api_key
+        )
+        
+        # 쿼리를 임베딩으로 변환
+        query_vector = await embeddings.aembed_query(query)
+        
+        # pgvector를 사용한 코사인 유사도 검색
+        search_query = """
+        SELECT 
+            content,
+            source_table,
+            source_id,
+            meta_data,
+            1 - (embedding <=> %s::vector) as similarity
+        FROM document_embeddings
+        WHERE embedding IS NOT NULL
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+        """
+        
+        db_manager = get_database_manager()
+        async with db_manager.get_async_session() as session:
+            db_service = DatabaseService(session)
+            
+            # 벡터를 문자열로 변환
+            vector_str = f"[{','.join(map(str, query_vector))}]"
+            
+            results = await db_service.execute_raw_query(
+                search_query.replace('%s', '$1').replace('%s', '$2').replace('%s', '$3'),
+                (vector_str, vector_str, limit)
+            )
+        
+        if not results:
+            return f"'{query}'와 관련된 문서를 찾을 수 없습니다. 먼저 create_embeddings_for_stats 도구를 사용해 데이터를 임베딩하세요."
+        
+        lines = [f"🔍 '{query}' 의미 검색 결과:", ""]
+        
+        for i, result in enumerate(results, 1):
+            similarity = f"{result['similarity']:.3f}"
+            content_preview = result['content'][:100] + "..." if len(result['content']) > 100 else result['content']
+            
+            lines.append(f"{i}. 유사도: {similarity}")
+            lines.append(f"   내용: {content_preview}")
+            lines.append(f"   출처: {result['source_table']} (ID: {result['source_id']})")
+            
+            # 메타데이터가 있으면 표시
+            if result.get('meta_data'):
+                meta_data = result['meta_data']
+                if isinstance(meta_data, dict) and meta_data:
+                    meta_info = []
+                    for key, value in meta_data.items():
+                        if value is not None:
+                            meta_info.append(f"{key}: {value}")
+                    if meta_info:
+                        lines.append(f"   세부정보: {', '.join(meta_info[:3])}")  # 최대 3개만
+            
+            lines.append("")
+        
+        return "\n".join(lines)
+        
+    except Exception as e:
+        logger.error(f"의미 검색 오류: {str(e)}")
+        return f"의미 검색 중 오류가 발생했습니다: {str(e)}"
+
+
+@tool
+async def create_embeddings_for_stats(year: int = 2023) -> str:
+    """
+    통계 데이터의 설명을 임베딩으로 변환하여 저장합니다.
+    
+    Args:
+        year: 임베딩을 생성할 연도 (기본값: 2023)
+    
+    Returns:
+        임베딩 생성 결과
+    """
+    try:
+        from langchain_openai import OpenAIEmbeddings
+        from src.config.settings import get_settings
+        
+        settings = get_settings()
+        
+        # OpenAI 임베딩 클라이언트 설정
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            openai_api_key=settings.openai_api_key
+        )
+        
+        # 통계 데이터 요약 정보 조회
+        summary_query = """
+        SELECT 
+            CONCAT('stats_', adm_cd, '_', year) as record_id,
+            adm_cd,
+            adm_nm,
+            year,
+            tot_ppltn,
+            avg_age,
+            ppltn_dnsty,
+            male_ppltn,
+            female_ppltn,
+            CONCAT(
+                adm_nm, ' ', year, '년 통계: ',
+                '총인구 ', COALESCE(tot_ppltn::text, '정보없음'), '명, ',
+                '평균연령 ', COALESCE(avg_age::text, '정보없음'), '세, ',
+                '인구밀도 ', COALESCE(ppltn_dnsty::text, '정보없음'), '명/㎢, ',
+                '남성 ', COALESCE(male_ppltn::text, '정보없음'), '명, ',
+                '여성 ', COALESCE(female_ppltn::text, '정보없음'), '명'
+            ) as description
+        FROM population_stats 
+        WHERE year = %s
+        AND tot_ppltn IS NOT NULL
+        ORDER BY adm_cd
+        """
+        
+        db_manager = get_database_manager()
+        async with db_manager.get_async_session() as session:
+            db_service = DatabaseService(session)
+            stats = await db_service.execute_raw_query(summary_query, (year,))
+        
+        if not stats:
+            return f"{year}년 통계 데이터를 찾을 수 없습니다."
+        
+        embedded_count = 0
+        error_count = 0
+        
+        # 배치로 임베딩 생성 (속도 향상)
+        descriptions = [stat['description'] for stat in stats]
+        
+        try:
+            # 임베딩 배치 생성
+            embedding_vectors = await embeddings.aembed_documents(descriptions)
+            
+            # 각 통계 데이터에 대해 임베딩 저장
+            for stat, embedding_vector in zip(stats, embedding_vectors):
+                try:
+                    # 메타데이터 구성
+                    metadata = {
+                        'year': stat['year'],
+                        'total_population': stat['tot_ppltn'],
+                        'avg_age': stat['avg_age'],
+                        'population_density': stat['ppltn_dnsty'],
+                        'male_population': stat['male_ppltn'],
+                        'female_population': stat['female_ppltn']
+                    }
+                    
+                    # 벡터를 문자열로 변환
+                    vector_str = f"[{','.join(map(str, embedding_vector))}]"
+                    
+                    # DB에 저장 (UPSERT)
+                    upsert_query = """
+                    INSERT INTO document_embeddings (content, source_table, source_id, meta_data, embedding)
+                    VALUES (%s, 'population_stats', %s, %s, %s::vector)
+                    ON CONFLICT (source_table, source_id) 
+                    DO UPDATE SET 
+                        content = EXCLUDED.content,
+                        meta_data = EXCLUDED.meta_data,
+                        embedding = EXCLUDED.embedding,
+                        updated_at = CURRENT_TIMESTAMP
+                    """
+                    
+                    await db_service.execute_raw_query(
+                        upsert_query,
+                        (
+                            stat['description'],
+                            stat['record_id'],
+                            metadata,
+                            vector_str
+                        )
+                    )
+                    embedded_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"개별 임베딩 저장 오류 (ID: {stat['record_id']}): {e}")
+                    error_count += 1
+                    continue
+            
+        except Exception as e:
+            logger.error(f"배치 임베딩 생성 오류: {e}")
+            return f"임베딩 생성 중 오류가 발생했습니다: {str(e)}"
+        
+        result_msg = f"✅ {year}년 통계 데이터 {embedded_count}개의 임베딩을 생성했습니다."
+        if error_count > 0:
+            result_msg += f"\n⚠️  {error_count}개 레코드에서 오류가 발생했습니다."
+        
+        return result_msg
+        
+    except Exception as e:
+        logger.error(f"임베딩 생성 오류: {str(e)}")
+        return f"임베딩 생성 중 오류가 발생했습니다: {str(e)}"
+
+
+@tool
+async def get_embedding_stats() -> str:
+    """
+    현재 저장된 임베딩 통계를 조회합니다.
+    
+    Returns:
+        임베딩 데이터베이스 현황
+    """
+    try:
+        stats_query = """
+        SELECT 
+            source_table,
+            COUNT(*) as total_count,
+            COUNT(embedding) as embedded_count,
+            MIN(created_at) as oldest_created,
+            MAX(updated_at) as latest_updated
+        FROM document_embeddings
+        GROUP BY source_table
+        ORDER BY total_count DESC
+        """
+        
+        db_manager = get_database_manager()
+        async with db_manager.get_async_session() as session:
+            db_service = DatabaseService(session)
+            results = await db_service.execute_raw_query(stats_query)
+        
+        if not results:
+            return "저장된 임베딩 데이터가 없습니다."
+        
+        lines = ["📊 임베딩 데이터베이스 현황:", ""]
+        
+        total_records = 0
+        total_embedded = 0
+        
+        for result in results:
+            source = result['source_table']
+            total = result['total_count']
+            embedded = result['embedded_count']
+            oldest = result['oldest_created']
+            latest = result['latest_updated']
+            
+            total_records += total
+            total_embedded += embedded
+            
+            completion_rate = (embedded / total * 100) if total > 0 else 0
+            
+            lines.append(f"🗂️  {source}:")
+            lines.append(f"   - 총 레코드: {total:,}개")
+            lines.append(f"   - 임베딩 완료: {embedded:,}개 ({completion_rate:.1f}%)")
+            lines.append(f"   - 생성일: {oldest.strftime('%Y-%m-%d') if oldest else 'N/A'}")
+            lines.append(f"   - 최종 업데이트: {latest.strftime('%Y-%m-%d %H:%M') if latest else 'N/A'}")
+            lines.append("")
+        
+        # 전체 요약
+        overall_completion = (total_embedded / total_records * 100) if total_records > 0 else 0
+        lines.append("📈 전체 요약:")
+        lines.append(f"   - 총 레코드: {total_records:,}개")
+        lines.append(f"   - 임베딩 완료: {total_embedded:,}개 ({overall_completion:.1f}%)")
+        
+        return "\n".join(lines)
+        
+    except Exception as e:
+        logger.error(f"임베딩 통계 조회 오류: {str(e)}")
+        return f"임베딩 통계 조회 중 오류가 발생했습니다: {str(e)}"
+
+
 # 사용 가능한 도구들
 AVAILABLE_TOOLS = [
     execute_sql_query,
     get_table_info,
     get_available_tables,
     search_administrative_area,
+    semantic_search,
+    create_embeddings_for_stats,
+    get_embedding_stats,
 ]

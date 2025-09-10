@@ -8,6 +8,7 @@ from sqlalchemy import (
     Column, String, Integer, Float, DateTime, Text, BigInteger, 
     Boolean, JSON, ForeignKey, Index, UniqueConstraint
 )
+# pgvector는 SQL에서 직접 관리하고, Python에서는 TEXT로 처리
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -258,6 +259,9 @@ class HouseholdMemberStats(Base, TimestampMixin):
         UniqueConstraint("year", "adm_cd", "data_type", "gender", "age_from", "age_to", name="uq_member_full"),
     )
 
+
+# DocumentEmbedding 테이블은 SQL 초기화 스크립트에서 직접 생성
+# SQLAlchemy 모델에서는 제외하여 pgvector 의존성 문제 해결
 
 class CrawlLog(Base, TimestampMixin):
     """크롤링 로그"""

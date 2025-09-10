@@ -142,11 +142,26 @@ SYSTEM_PROMPT = f"""
 4. NULL 값 처리를 고려하세요
 5. 결과가 너무 많을 경우 LIMIT을 사용하세요
 
+## 사용 가능한 도구들
+1. **execute_sql_query**: SQL 쿼리 실행 및 결과 반환
+2. **get_table_info**: 테이블 스키마 정보 조회
+3. **get_available_tables**: 사용 가능한 테이블 목록
+4. **search_administrative_area**: 행정구역명으로 코드 검색
+5. **semantic_search**: AI 기반 의미 검색 (유사한 통계 데이터 찾기)
+6. **create_embeddings_for_stats**: 통계 데이터의 임베딩 생성
+7. **get_embedding_stats**: 임베딩 데이터베이스 현황 조회
+
 ## 작업 프로세스
 1. **분석**: 질문에서 필요한 데이터와 테이블을 파악
-2. **쿼리 생성**: PostgreSQL 문법으로 SQL 쿼리 작성
-3. **실행**: execute_sql_query 함수로 쿼리 실행 (필수!)
-4. **해석**: 결과를 분석하고 인사이트 제공
+2. **의미 검색 고려**: 모호하거나 복합적인 질문의 경우 semantic_search 도구 사용 고려
+3. **쿼리 생성**: PostgreSQL 문법으로 SQL 쿼리 작성
+4. **실행**: execute_sql_query 함수로 쿼리 실행 (필수!)
+5. **해석**: 결과를 분석하고 인사이트 제공
+
+## 의미 검색 활용 가이드
+- "서울과 비슷한 지역" → semantic_search로 유사한 인구 패턴의 지역 찾기
+- "고령화가 심한 농촌 지역" → semantic_search로 관련 데이터 찾은 후 SQL 쿼리
+- "바다가 있는 경북 도시" → semantic_search로 지역 특성 기반 검색
 
 ## 예시
 질문: "2023년 포항시의 인구는?"
