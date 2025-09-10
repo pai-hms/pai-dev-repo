@@ -486,6 +486,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             tool_status_placeholder = st.empty()
             
             for chunk in call_agent_api_stream(prompt):
+                print(f"[DEBUG] 받은 청크: {chunk}")  # 디버그 로그
                 if chunk["type"] == "token":
                     full_response += chunk["content"]
                     response_placeholder.write(f"AI: {full_response}▌")  # 임시 표시
@@ -526,6 +527,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             
             # 에러가 발생하지 않은 경우에만 메시지 저장
             if not error_occurred:
+                print(f"[DEBUG] 스트리밍 완료. 최종 응답 길이: {len(full_response)}")  # 디버그 로그
                 # 최종 응답을 세션에 저장 (도구 정보 포함)
                 assistant_message = {
                     "role": "assistant", 
@@ -538,9 +540,10 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                     assistant_message["sql_queries"] = final_state_data.get("sql_results", [])
                 
                 st.session_state.messages.append(assistant_message)
+                print(f"[DEBUG] 메시지 저장 완료. 총 메시지 수: {len(st.session_state.messages)}")  # 디버그 로그
                 
-                # 화면 새로고침을 위해 rerun
-                st.rerun()
+                # 최종 응답 표시 (rerun 대신)
+                response_placeholder.write(f"AI: {full_response}")
             
         except Exception as e:
             # 스트리밍 실패 시 일반 API 호출
