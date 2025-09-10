@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from src.config.settings import get_settings
 
+# 프롬프트는 prompt.py 파일에서 import
+from .prompt import SYSTEM_PROMPT, HUMAN_PROMPT, TABLE_SCHEMA_INFO
 
 @dataclass
 class AgentConfig:
@@ -29,6 +31,3 @@ def get_agent_config() -> AgentConfig:
     """에이전트 설정 반환"""
     return AgentConfig()
 
-
-# 프롬프트는 prompt.py 파일에서 import
-from .prompt import SYSTEM_PROMPT, HUMAN_PROMPT, TABLE_SCHEMA_INFO

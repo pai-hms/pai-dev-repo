@@ -194,12 +194,16 @@ class SQLAgentService:
                     initial_state = existing_state.values.copy()
                     initial_state["current_query"] = question
                     
+                    # 새로운 질문이므로 완료 상태를 리셋
+                    initial_state["is_complete"] = False
+                    initial_state["error_message"] = None
+                    
                     # 불완전한 tool call 상태 정리
                     messages = initial_state.get("messages", [])
                     if messages:
                         initial_state["messages"] = self._clean_incomplete_tool_calls(messages)
                     
-                    logger.info(f"💾 기존 대화 기록 로드 완료")
+                    logger.info(f"💾 기존 대화 기록 로드 완료 (상태 리셋)")
                     return initial_state
             except Exception as e:
                 logger.warning(f"⚠️ 기존 상태 로드 실패: {str(e)}")

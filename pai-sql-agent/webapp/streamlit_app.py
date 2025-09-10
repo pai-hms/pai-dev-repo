@@ -99,9 +99,9 @@ st.markdown("**한국 센서스 통계 데이터 AI 분석 도구**")
 
 # API 상태 표시
 if check_api_health():
-    st.success(f"🟢 API 서버 연결됨: {API_BASE_URL}")
+    st.success(f"🟢 API 서버 연결됨")
 else:
-    st.error(f"🔴 API 서버 연결 실패: {API_BASE_URL}")
+    st.error(f"🔴 API 서버 연결 실패")
 
 # 사이드바
 with st.sidebar:

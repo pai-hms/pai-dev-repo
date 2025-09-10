@@ -133,28 +133,14 @@ class SQLAgentNode:
             # 메시지 상태 검증 및 정리
             messages = self._clean_incomplete_tool_calls(messages)
             
-            # 새로운 질문이 있으면 항상 추가 (멀티턴 지원)
+            # 새로운 질문이 있으면 항상 추가 (동일한 질문이라도 새로운 응답 생성)
             if current_query:
-                # 마지막 메시지가 같은 질문이 아닌 경우에만 추가
-                should_add_message = True
-                if messages:
-                    last_human_msg = None
-                    for msg in reversed(messages):
-                        if isinstance(msg, HumanMessage):
-                            last_human_msg = msg
-                            break
-                    
-                    if last_human_msg and last_human_msg.content.strip() == current_query.strip():
-                        should_add_message = False
-                        logger.info("📋 동일한 질문이므로 메시지 추가 건너뛰기")
-                
-                if should_add_message:
-                    user_msg = HumanMessage(
-                        content=current_query,
-                        additional_kwargs={"timestamp": datetime.now().isoformat()}
-                    )
-                    messages.append(user_msg)
-                    logger.info(f"💬 새 사용자 질문 추가: {current_query[:50]}...")
+                user_msg = HumanMessage(
+                    content=current_query,
+                    additional_kwargs={"timestamp": datetime.now().isoformat()}
+                )
+                messages.append(user_msg)
+                logger.info(f"💬 사용자 질문 추가: {current_query[:50]}...")
             
             # Chain 호출로 분석 수행
             response = await self.analysis_chain.ainvoke({"messages": messages}, config=config)
@@ -328,28 +314,46 @@ class SQLAgentNode:
         """라우팅 조건 판단 (딕셔너리 기반)"""
         # 에러가 있으면 종료
         if state.get("error_message"):
+            logger.info("🛑 에러로 인한 종료")
             return "end"
         
         # 완료되었으면 종료
         if state.get("is_complete"):
+            logger.info("✅ 완료로 인한 종료")
             return "end"
         
         # 최대 반복 횟수 초과시 종료
-        if state.get("iteration_count", 0) >= state.get("max_iterations", 10):
+        iteration_count = state.get("iteration_count", 0)
+        max_iterations = state.get("max_iterations", 10)
+        if iteration_count >= max_iterations:
+            logger.info(f"🔄 최대 반복 횟수 초과 ({iteration_count}/{max_iterations})")
             return "end"
         
-        # 마지막 메시지가 도구 호출을 포함하면 도구 실행
+        # 메시지 상태 분석
         messages = state.get("messages", [])
+        logger.info(f"📋 메시지 개수: {len(messages)}")
+        
         if messages:
             last_message = messages[-1]
+            logger.info(f"📝 마지막 메시지 타입: {type(last_message).__name__}")
+            
+            # AI 메시지에 도구 호출이 있는 경우
             if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                logger.info(f"🔧 도구 호출 발견: {len(last_message.tool_calls)}개")
                 return "execute_tools"
             
             # 도구 메시지 다음엔 응답 생성
             if isinstance(last_message, ToolMessage):
+                logger.info("🛠️ 도구 메시지 후 응답 생성")
                 return "generate_response"
+            
+            # AI 메시지이지만 도구 호출이 없는 경우 - 최종 응답으로 처리
+            if isinstance(last_message, AIMessage):
+                logger.info("🤖 AI 응답 완료 - 종료")
+                return "end"
         
-        # 첫 번째 분석 후엔 도구 실행 또는 응답 생성
+        # 기본적으로 응답 생성
+        logger.info("📝 기본 응답 생성")
         return "generate_response"
 
 

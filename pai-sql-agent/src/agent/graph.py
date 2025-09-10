@@ -6,7 +6,6 @@ import logging
 import traceback
 from typing import Dict, Any, AsyncGenerator, Optional
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import ToolMessage
 
@@ -116,7 +115,7 @@ async def create_checkpointer():
         return MemorySaver()
 
 
-async def create_sql_agent_graph(enable_checkpointer: bool = True) -> CompiledStateGraph:
+async def create_sql_agent_graph(enable_checkpointer: bool = True):
     """SQL Agent 그래프 생성"""
     
     # 그래프 생성
@@ -170,6 +169,6 @@ async def create_sql_agent_graph(enable_checkpointer: bool = True) -> CompiledSt
 
 
 # 하위 호환성을 위한 함수 (service.py로 이동됨)
-async def create_sql_agent(enable_checkpointer: bool = True) -> CompiledStateGraph:
+async def create_sql_agent(enable_checkpointer: bool = True):
     """하위 호환성을 위한 래퍼 함수"""
     return await create_sql_agent_graph(enable_checkpointer)
