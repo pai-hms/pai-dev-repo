@@ -1,29 +1,26 @@
 """
-LangGraph 노드 정의
-각 노드는 단일 책임을 가지며, 선형원리에 따라 직선적 흐름을 유지
+LangGraph 노드 정의 + 상태 정의
+Chain invoke 방식을 사용한 깔끔한 구조
 """
 import logging
-from typing import Dict, Any, List, Optional, Sequence
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
+from typing import Dict, Any, List, Optional, TypedDict
+from datetime import datetime
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import BaseTool
 
-from src.agent.settings import get_agent_config, SYSTEM_PROMPT, HUMAN_PROMPT
+from src.agent.settings import get_agent_config
+from src.agent.prompt import SYSTEM_PROMPT
 from src.agent.tools import AVAILABLE_TOOLS
 from src.config.settings import get_settings
 
-
 logger = logging.getLogger(__name__)
 
-
-# LangGraph 호환 상태 타입 정의
-from typing import TypedDict
-
+# ===== 상태 정의 =====
 class AgentState(TypedDict):
-    """
-    LangGraph 호환 에이전트 상태 
-    딕셔너리 기반으로 완전한 직렬화/역직렬화 지원
-    """
+    """SQL Agent 상태"""
     messages: List[BaseMessage]
     current_query: str
     sql_results: List[str]
@@ -46,9 +43,9 @@ def create_agent_state(query: str = "") -> AgentState:
         "used_tools": []
     }
 
-
-class SQLAgentNodes:
-    """SQL 에이전트 노드들"""
+# ===== 노드 로직 =====
+class SQLAgentNode:
+    """SQL Agent의 메인 노드 - Chain invoke 방식 사용"""
     
     def __init__(self):
         self.settings = get_settings()
@@ -63,43 +60,112 @@ class SQLAgentNodes:
             streaming=self.agent_config.enable_streaming
         )
         
-        # 도구 바인딩
-        self.llm_with_tools = self.llm.bind_tools(AVAILABLE_TOOLS)
+        # Chain 생성
+        self.analysis_chain = self._create_analysis_chain()
+        self.response_chain = self._create_response_chain()
     
-    async def analyze_question_node(self, state: AgentState) -> AgentState:
-        """질문 분석 노드 (딕셔너리 기반)"""
+    def _create_analysis_chain(self):
+        """분석용 체인 생성 (도구 포함)"""
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("placeholder", "{messages}"),
+        ])
+        
+        llm_with_tools = self.llm.bind_tools(AVAILABLE_TOOLS)
+        return prompt | llm_with_tools
+    
+    def _create_response_chain(self):
+        """응답 생성용 체인 생성 (도구 없음)"""
+        prompt = ChatPromptTemplate.from_messages([
+            ("placeholder", "{messages}"),
+        ])
+        
+        return prompt | self.llm
+    
+    def _clean_incomplete_tool_calls(self, messages: List[BaseMessage]) -> List[BaseMessage]:
+        """불완전한 tool call 메시지들을 정리"""
+        cleaned_messages = []
+        i = 0
+        
+        while i < len(messages):
+            message = messages[i]
+            
+            # AI 메시지에 tool_calls가 있는 경우
+            if isinstance(message, AIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
+                # 다음 메시지들이 모든 tool_calls에 대한 ToolMessage인지 확인
+                tool_call_ids = {call['id'] for call in message.tool_calls}
+                j = i + 1
+                found_tool_messages = set()
+                
+                # 연속된 ToolMessage들을 찾아서 매칭되는지 확인
+                while j < len(messages) and isinstance(messages[j], ToolMessage):
+                    if messages[j].tool_call_id in tool_call_ids:
+                        found_tool_messages.add(messages[j].tool_call_id)
+                    j += 1
+                
+                # 모든 tool_calls에 대한 응답이 있는 경우에만 추가
+                if tool_call_ids == found_tool_messages:
+                    # AI 메시지와 해당하는 모든 ToolMessage들을 추가
+                    cleaned_messages.append(message)
+                    for k in range(i + 1, j):
+                        if isinstance(messages[k], ToolMessage) and messages[k].tool_call_id in tool_call_ids:
+                            cleaned_messages.append(messages[k])
+                    i = j
+                else:
+                    # 불완전한 tool call이므로 건너뛰기
+                    logger.warning(f"⚠️ 불완전한 tool call 발견 - 건너뛰기: {tool_call_ids - found_tool_messages}")
+                    i = j
+            else:
+                # 일반 메시지는 그대로 추가
+                cleaned_messages.append(message)
+                i += 1
+        
+        return cleaned_messages
+    
+    async def analyze_question(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
+        """질문 분석 노드 - Chain invoke 방식"""
         try:
             logger.info("🔍 질문 분석 시작")
             
             messages = state["messages"].copy()
             current_query = state["current_query"]
-            iteration_count = state["iteration_count"]
             
-            # 첫 번째 메시지인 경우에만 시스템 프롬프트 추가
-            if not messages:
-                logger.info("📝 새 대화 시작 - 시스템 프롬프트 추가")
-                from src.agent.settings import SYSTEM_PROMPT
-                # 시스템 프롬프트를 AI 메시지로 추가 (대화 기록에 포함)
-                system_msg = AIMessage(content=SYSTEM_PROMPT)
-                messages.append(system_msg)
+            # 메시지 상태 검증 및 정리
+            messages = self._clean_incomplete_tool_calls(messages)
             
-            # 현재 질문을 사용자 메시지로 추가
+            # 새로운 질문이 있으면 항상 추가 (멀티턴 지원)
             if current_query:
-                user_msg = HumanMessage(content=current_query)
-                messages.append(user_msg)
-                logger.info(f"💬 사용자 질문 추가: {current_query[:50]}...")
+                # 마지막 메시지가 같은 질문이 아닌 경우에만 추가
+                should_add_message = True
+                if messages:
+                    last_human_msg = None
+                    for msg in reversed(messages):
+                        if isinstance(msg, HumanMessage):
+                            last_human_msg = msg
+                            break
+                    
+                    if last_human_msg and last_human_msg.content.strip() == current_query.strip():
+                        should_add_message = False
+                        logger.info("📋 동일한 질문이므로 메시지 추가 건너뛰기")
+                
+                if should_add_message:
+                    user_msg = HumanMessage(
+                        content=current_query,
+                        additional_kwargs={"timestamp": datetime.now().isoformat()}
+                    )
+                    messages.append(user_msg)
+                    logger.info(f"💬 새 사용자 질문 추가: {current_query[:50]}...")
             
-            # LLM 호출
-            response = await self.llm_with_tools.ainvoke(messages)
+            # Chain 호출로 분석 수행
+            response = await self.analysis_chain.ainvoke({"messages": messages}, config=config)
             messages.append(response)
             
             logger.info("✅ 질문 분석 완료")
             
-            # 딕셔너리 상태 업데이트하여 반환
             return {
                 **state,
                 "messages": messages,
-                "iteration_count": iteration_count + 1
+                "iteration_count": state["iteration_count"] + 1
             }
             
         except Exception as e:
@@ -214,26 +280,26 @@ class SQLAgentNodes:
                 "is_complete": True
             }
     
-    async def generate_response_node(self, state: AgentState) -> AgentState:
-        """응답 생성 노드 (딕셔너리 기반)"""
+    async def generate_response(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
+        """응답 생성 노드 - Chain invoke 방식"""
         try:
             logger.info("🎯 최종 응답 생성 시작")
             
             messages = state["messages"].copy()
             
-            # 도구 실행 결과가 있으면 최종 응답 생성
+            # 메시지 상태 검증 및 정리
+            messages = self._clean_incomplete_tool_calls(messages)
+            
             if messages and len(messages) > 1:
-                # 전체 컨텍스트를 포함한 응답 생성
-                response = await self.llm.ainvoke(messages)
+                # Chain 호출로 응답 생성
+                response = await self.response_chain.ainvoke({"messages": messages}, config=config)
                 messages.append(response)
                 logger.info("✅ 최종 응답 생성 완료")
             else:
-                # 메시지가 없는 경우 기본 응답
                 default_response = AIMessage(content="죄송합니다. 적절한 응답을 생성할 수 없습니다.")
                 messages.append(default_response)
                 logger.warning("⚠️ 기본 응답으로 처리")
             
-            # 딕셔너리 상태 업데이트하여 반환
             return {
                 **state,
                 "messages": messages,
@@ -258,7 +324,7 @@ class SQLAgentNodes:
                 return tool
         return None
     
-    def should_continue_routing(self, state: AgentState) -> str:
+    def should_continue_routing(self, state: Dict[str, Any]) -> str:
         """라우팅 조건 판단 (딕셔너리 기반)"""
         # 에러가 있으면 종료
         if state.get("error_message"):
@@ -287,36 +353,13 @@ class SQLAgentNodes:
         return "generate_response"
 
 
-# 노드 함수들 (LangGraph 딕셔너리 기반 래퍼)
-_nodes = SQLAgentNodes()
+# ===== 노드 인스턴스 (싱글톤) =====
+_sql_agent_node = SQLAgentNode()
 
+# ===== 래퍼 함수들 (기존 호환성 유지) =====
 async def analyze_question(state: Dict[str, Any]) -> Dict[str, Any]:
-    """질문 분석 노드 래퍼 (딕셔너리 기반)"""
-    logger.info("🔄 analyze_question 래퍼 호출")
-    try:
-        # 딕셔너리 상태를 AgentState 형식으로 변환
-        agent_state: AgentState = {
-            "messages": state.get("messages", []),
-            "current_query": state.get("current_query", ""),
-            "sql_results": state.get("sql_results", []),
-            "iteration_count": state.get("iteration_count", 0),
-            "max_iterations": state.get("max_iterations", 10),
-            "is_complete": state.get("is_complete", False),
-            "error_message": state.get("error_message"),
-            "used_tools": state.get("used_tools", [])
-        }
-        
-        result_state = await _nodes.analyze_question_node(agent_state)
-        logger.info("✅ analyze_question 래퍼 완료")
-        return result_state
-        
-    except Exception as e:
-        logger.error(f"❌ analyze_question 래퍼 오류: {e}")
-        return {
-            **state,
-            "error_message": f"질문 분석 래퍼 오류: {str(e)}",
-            "is_complete": True
-        }
+    """질문 분석 노드 래퍼"""
+    return await _sql_agent_node.analyze_question(state)
 
 async def execute_tools(state: Dict[str, Any]) -> Dict[str, Any]:
     """도구 실행 노드 래퍼 (딕셔너리 기반)"""
@@ -334,7 +377,7 @@ async def execute_tools(state: Dict[str, Any]) -> Dict[str, Any]:
             "used_tools": state.get("used_tools", [])
         }
         
-        result_state = await _nodes.execute_tools_node(agent_state)
+        result_state = await _sql_agent_node.execute_tools_node(agent_state)
         logger.info("✅ execute_tools 래퍼 완료")
         return result_state
         
@@ -347,32 +390,8 @@ async def execute_tools(state: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 async def generate_response(state: Dict[str, Any]) -> Dict[str, Any]:
-    """응답 생성 노드 래퍼 (딕셔너리 기반)"""
-    logger.info("🔄 generate_response 래퍼 호출")
-    try:
-        # 딕셔너리 상태를 AgentState 형식으로 변환
-        agent_state: AgentState = {
-            "messages": state.get("messages", []),
-            "current_query": state.get("current_query", ""),
-            "sql_results": state.get("sql_results", []),
-            "iteration_count": state.get("iteration_count", 0),
-            "max_iterations": state.get("max_iterations", 10),
-            "is_complete": state.get("is_complete", False),
-            "error_message": state.get("error_message"),
-            "used_tools": state.get("used_tools", [])
-        }
-        
-        result_state = await _nodes.generate_response_node(agent_state)
-        logger.info("✅ generate_response 래퍼 완료")
-        return result_state
-        
-    except Exception as e:
-        logger.error(f"❌ generate_response 래퍼 오류: {e}")
-        return {
-            **state,
-            "error_message": f"응답 생성 래퍼 오류: {str(e)}",
-            "is_complete": True
-        }
+    """응답 생성 노드 래퍼"""
+    return await _sql_agent_node.generate_response(state)
 
 def should_continue(state: Dict[str, Any]) -> str:
     """라우팅 조건 판단 래퍼 (딕셔너리 기반)"""
@@ -390,7 +409,7 @@ def should_continue(state: Dict[str, Any]) -> str:
             "used_tools": state.get("used_tools", [])
         }
         
-        result = _nodes.should_continue_routing(agent_state)
+        result = _sql_agent_node.should_continue_routing(agent_state)
         logger.info(f"✅ should_continue 래퍼 완료: {result}")
         return result
         

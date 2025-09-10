@@ -22,9 +22,6 @@ docker-compose up --build
 # 백그라운드 실행
 docker-compose up -d --build
 
-# 메모리 기능 테스트 (중요!)
-docker-compose --profile test run --rm test-memory
-
 # 완전 재빌드
 docker-compose down
 docker-compose build --no-cache

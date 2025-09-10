@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage
 
 from webapp.models import QueryRequest, QueryResponse, StreamChunk, ToolInfo
-from src.agent.graph import get_sql_agent_service
+from src.agent.service import get_sql_agent_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
