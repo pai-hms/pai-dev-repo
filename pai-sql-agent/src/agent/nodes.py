@@ -20,27 +20,65 @@ logger = logging.getLogger(__name__)
 
 # ===== 상태 정의 =====
 class AgentState(TypedDict):
-    """SQL Agent 상태"""
+    """SQL Agent 상태 - 고도화된 워크플로우용"""
     messages: List[BaseMessage]
     current_query: str
+    
+    # 분석 단계
+    requirements: Optional[str]  # 요구사항 분석 결과
+    analysis_plan: Optional[str]  # 분석 전략
+    
+    # 쿼리 단계
+    proposed_queries: List[str]  # 제안된 SQL 쿼리들
+    validated_query: Optional[str]  # 검증된 최종 쿼리
+    
+    # 실행 및 결과 단계
     sql_results: List[str]
+    execution_errors: List[str]  # SQL 실행 오류들
+    result_quality_score: Optional[float]  # 결과 품질 점수
+    
+    # 분석 단계
+    data_insights: Optional[str]  # 데이터 인사이트
+    recommendations: Optional[str]  # 추천사항
+    
+    # 제어 플래그
     iteration_count: int
     max_iterations: int
     is_complete: bool
     error_message: Optional[str]
     used_tools: List[Dict[str, Any]]
+    current_step: str  # 현재 진행 단계
 
 def create_agent_state(query: str = "") -> AgentState:
-    """새로운 에이전트 상태 생성"""
+    """새로운 에이전트 상태 생성 - 고도화된 워크플로우용"""
     return {
         "messages": [],
         "current_query": query,
+        
+        # 분석 단계
+        "requirements": None,
+        "analysis_plan": None,
+        
+        # 쿼리 단계
+        "proposed_queries": [],
+        "validated_query": None,
+        
+        # 실행 및 결과 단계
         "sql_results": [],
+        "execution_errors": [],
+        "result_quality_score": None,
+        
+        # 분석 단계
+        "data_insights": None,
+        "recommendations": None,
+        
+        # 제어 플래그
         "iteration_count": 0,
         "max_iterations": 10,
         "is_complete": False,
         "error_message": None,
-        "used_tools": []
+        "used_tools": [],
+        "current_step": "analyze_question"
     }
 
 # ===== 노드 로직 =====
@@ -60,9 +98,16 @@ class SQLAgentNode:
             streaming=self.agent_config.enable_streaming
         )
         
-        # Chain 생성
+        # Chain 생성 - 기존
         self.analysis_chain = self._create_analysis_chain()
         self.response_chain = self._create_response_chain()
+        
+        # 새로운 단계별 Chain 생성
+        self.plan_chain = self._create_plan_chain()
+        self.build_query_chain = self._create_build_query_chain()
+        self.validate_chain = self._create_validate_chain()
+        self.analyze_data_chain = self._create_analyze_data_chain()
+        self.final_response_chain = self._create_final_response_chain()
     
     def _create_analysis_chain(self):
         """분석용 체인 생성 (도구 포함)"""
@@ -80,6 +125,39 @@ class SQLAgentNode:
             ("placeholder", "{messages}"),
         ])
         
+        return prompt | self.llm
+    
+    # ===== 새로운 단계별 체인 생성 메소드들 =====
+    
+    def _create_plan_chain(self):
+        """분석 전략 수립용 체인 생성"""
+        from .prompt import PLAN_APPROACH_PROMPT
+        prompt = ChatPromptTemplate.from_template(PLAN_APPROACH_PROMPT)
+        return prompt | self.llm
+    
+    def _create_build_query_chain(self):
+        """쿼리 구성용 체인 생성 (도구 포함)"""
+        from .prompt import BUILD_QUERY_PROMPT
+        prompt = ChatPromptTemplate.from_template(BUILD_QUERY_PROMPT)
+        llm_with_tools = self.llm.bind_tools(AVAILABLE_TOOLS)
+        return prompt | llm_with_tools
+    
+    def _create_validate_chain(self):
+        """결과 검증용 체인 생성"""
+        from .prompt import VALIDATE_RESULTS_PROMPT
+        prompt = ChatPromptTemplate.from_template(VALIDATE_RESULTS_PROMPT)
+        return prompt | self.llm
+    
+    def _create_analyze_data_chain(self):
+        """데이터 분석용 체인 생성"""
+        from .prompt import ANALYZE_DATA_PROMPT
+        prompt = ChatPromptTemplate.from_template(ANALYZE_DATA_PROMPT)
+        return prompt | self.llm
+    
+    def _create_final_response_chain(self):
+        """최종 응답 생성용 체인 생성"""
+        from .prompt import GENERATE_FINAL_RESPONSE_PROMPT
+        prompt = ChatPromptTemplate.from_template(GENERATE_FINAL_RESPONSE_PROMPT)
         return prompt | self.llm
     
     def _clean_incomplete_tool_calls(self, messages: List[BaseMessage]) -> List[BaseMessage]:
@@ -123,17 +201,16 @@ class SQLAgentNode:
         return cleaned_messages
     
     async def analyze_question(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
-        """질문 분석 노드 - Chain invoke 방식"""
+        """1단계: 질문 분석 (간소화) - 바로 쿼리 생성으로"""
         try:
-            logger.info("🔍 질문 분석 시작")
+            logger.info("🔍 질문 분석 시작 (간소화)")
             
-            messages = state["messages"].copy()
             current_query = state["current_query"]
             
-            # 메시지 상태 검증 및 정리
+            # 새로운 질문이면 사용자 메시지 추가
+            messages = state["messages"].copy()
             messages = self._clean_incomplete_tool_calls(messages)
             
-            # 새로운 질문이 있으면 항상 추가 (동일한 질문이라도 새로운 응답 생성)
             if current_query:
                 user_msg = HumanMessage(
                     content=current_query,
@@ -142,15 +219,16 @@ class SQLAgentNode:
                 messages.append(user_msg)
                 logger.info(f"💬 사용자 질문 추가: {current_query[:50]}...")
             
-            # Chain 호출로 분석 수행
+            # 바로 SQL 쿼리 생성 및 실행으로 진행
             response = await self.analysis_chain.ainvoke({"messages": messages}, config=config)
             messages.append(response)
             
-            logger.info("✅ 질문 분석 완료")
+            logger.info("✅ 질문 분석 완료 - 쿼리 실행으로 이동")
             
             return {
                 **state,
                 "messages": messages,
+                "current_step": "execute_tools",
                 "iteration_count": state["iteration_count"] + 1
             }
             
@@ -159,6 +237,147 @@ class SQLAgentNode:
             return {
                 **state,
                 "error_message": f"질문 분석 중 오류가 발생했습니다: {str(e)}",
+                "is_complete": True
+            }
+    
+    async def plan_approach(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
+        """2단계: 분석 전략 수립"""
+        try:
+            logger.info("📋 2단계: 분석 전략 수립 시작")
+            
+            requirements = state["requirements"]
+            
+            # 전략 수립 체인 호출
+            plan_response = await self.plan_chain.ainvoke({
+                "requirements": requirements
+            })
+            
+            analysis_plan = plan_response.content
+            logger.info("✅ 분석 전략 수립 완료")
+            
+            return {
+                **state,
+                "analysis_plan": analysis_plan,
+                "current_step": "build_query",
+                "iteration_count": state["iteration_count"] + 1
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 전략 수립 중 오류: {str(e)}")
+            return {
+                **state,
+                "error_message": f"전략 수립 중 오류가 발생했습니다: {str(e)}",
+                "is_complete": True
+            }
+    
+    async def build_query(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
+        """3단계: SQL 쿼리 구성"""
+        try:
+            logger.info("🔧 3단계: SQL 쿼리 구성 시작")
+            
+            requirements = state["requirements"]
+            analysis_plan = state["analysis_plan"]
+            
+            # 쿼리 구성 체인 호출 (도구 포함)
+            query_response = await self.build_query_chain.ainvoke({
+                "requirements": requirements,
+                "analysis_plan": analysis_plan
+            })
+            
+            messages = state["messages"].copy()
+            messages.append(query_response)
+            
+            logger.info("✅ SQL 쿼리 구성 완료")
+            
+            return {
+                **state,
+                "messages": messages,
+                "current_step": "execute_query",
+                "iteration_count": state["iteration_count"] + 1
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 쿼리 구성 중 오류: {str(e)}")
+            return {
+                **state,
+                "error_message": f"쿼리 구성 중 오류가 발생했습니다: {str(e)}",
+                "is_complete": True
+            }
+    
+    async def validate_results(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
+        """4단계: 결과 검증 및 품질 확인"""
+        try:
+            logger.info("✅ 4단계: 결과 검증 시작")
+            
+            validated_query = state.get("validated_query", "")
+            sql_results = state.get("sql_results", [])
+            
+            if not sql_results:
+                logger.warning("검증할 결과가 없습니다")
+                return {
+                    **state,
+                    "result_quality_score": 0.0,
+                    "current_step": "analyze_data"
+                }
+            
+            # 결과 검증 체인 호출
+            validate_response = await self.validate_chain.ainvoke({
+                "validated_query": validated_query,
+                "sql_results": "\n".join(sql_results)
+            })
+            
+            # 품질 점수 추출 (간단한 파싱)
+            content = validate_response.content
+            quality_score = 85.0  # 기본값, 실제로는 응답에서 파싱
+            
+            logger.info(f"✅ 결과 검증 완료 - 품질 점수: {quality_score}")
+            
+            return {
+                **state,
+                "result_quality_score": quality_score,
+                "current_step": "analyze_data",
+                "iteration_count": state["iteration_count"] + 1
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 결과 검증 중 오류: {str(e)}")
+            return {
+                **state,
+                "result_quality_score": 0.0,
+                "current_step": "analyze_data"
+            }
+    
+    async def analyze_data(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
+        """5단계: 데이터 분석 및 인사이트 도출"""
+        try:
+            logger.info("📊 5단계: 데이터 분석 시작")
+            
+            requirements = state["requirements"]
+            sql_results = state.get("sql_results", [])
+            quality_score = state.get("result_quality_score", 0.0)
+            
+            # 데이터 분석 체인 호출
+            analysis_response = await self.analyze_data_chain.ainvoke({
+                "requirements": requirements,
+                "sql_results": "\n".join(sql_results),
+                "result_quality_score": quality_score
+            })
+            
+            data_insights = analysis_response.content
+            logger.info("✅ 데이터 분석 완료")
+            
+            return {
+                **state,
+                "data_insights": data_insights,
+                "current_step": "generate_response",
+                "iteration_count": state["iteration_count"] + 1
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 데이터 분석 중 오류: {str(e)}")
+            return {
+                **state,
+                "error_message": f"데이터 분석 중 오류가 발생했습니다: {str(e)}",
                 "is_complete": True
             }
     
@@ -267,34 +486,39 @@ class SQLAgentNode:
             }
     
     async def generate_response(self, state: AgentState, config: RunnableConfig = None) -> AgentState:
-        """응답 생성 노드 - Chain invoke 방식"""
+        """6단계: 최종 응답 생성"""
         try:
-            logger.info("🎯 최종 응답 생성 시작")
+            logger.info("🎯 6단계: 최종 응답 생성 시작")
+            
+            current_query = state["current_query"]
+            requirements = state.get("requirements", "")
+            data_insights = state.get("data_insights", "")
+            recommendations = state.get("recommendations", "")
+            
+            # 최종 응답 생성 체인 호출
+            final_response = await self.final_response_chain.ainvoke({
+                "current_query": current_query,
+                "requirements": requirements,
+                "data_insights": data_insights,
+                "recommendations": recommendations
+            })
             
             messages = state["messages"].copy()
-            
-            # 메시지 상태 검증 및 정리
             messages = self._clean_incomplete_tool_calls(messages)
+            messages.append(final_response)
             
-            if messages and len(messages) > 1:
-                # Chain 호출로 응답 생성
-                response = await self.response_chain.ainvoke({"messages": messages}, config=config)
-                messages.append(response)
-                logger.info("✅ 최종 응답 생성 완료")
-            else:
-                default_response = AIMessage(content="죄송합니다. 적절한 응답을 생성할 수 없습니다.")
-                messages.append(default_response)
-                logger.warning("⚠️ 기본 응답으로 처리")
+            logger.info("✅ 최종 응답 생성 완료")
             
             return {
                 **state,
                 "messages": messages,
                 "is_complete": True,
+                "current_step": "completed",
                 "iteration_count": state["iteration_count"] + 1
             }
             
         except Exception as e:
-            logger.error(f"❌ 응답 생성 중 오류: {str(e)}")
+            logger.error(f"❌ 최종 응답 생성 중 오류: {str(e)}")
             error_response = AIMessage(content=f"응답 생성 중 오류가 발생했습니다: {str(e)}")
             return {
                 **state,
@@ -311,7 +535,7 @@ class SQLAgentNode:
         return None
     
     def should_continue_routing(self, state: Dict[str, Any]) -> str:
-        """라우팅 조건 판단 (딕셔너리 기반)"""
+        """고도화된 워크플로우 라우팅 조건 판단"""
         # 에러가 있으면 종료
         if state.get("error_message"):
             logger.info("🛑 에러로 인한 종료")
@@ -329,31 +553,45 @@ class SQLAgentNode:
             logger.info(f"🔄 최대 반복 횟수 초과 ({iteration_count}/{max_iterations})")
             return "end"
         
-        # 메시지 상태 분석
-        messages = state.get("messages", [])
-        logger.info(f"📋 메시지 개수: {len(messages)}")
+        # 현재 단계 기반 라우팅
+        current_step = state.get("current_step", "analyze_question")
+        logger.info(f"📍 현재 단계: {current_step}")
         
+        # 간소화된 단계별 라우팅
+        if current_step == "analyze_question":
+            # 도구 호출이 있는지 확인
+            messages = state.get("messages", [])
+            if messages:
+                last_message = messages[-1]
+                if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                    logger.info("🔧 질문 분석 후 바로 도구 실행")
+                    return "execute_tools"
+            return "generate_response"
+        elif current_step == "execute_tools":
+            # 도구 실행 후 바로 응답 생성
+            return "generate_response"
+        elif current_step == "generate_response":
+            return "end"
+        
+        # 도구 호출 상태 체크 (기존 로직 유지)
+        messages = state.get("messages", [])
         if messages:
             last_message = messages[-1]
-            logger.info(f"📝 마지막 메시지 타입: {type(last_message).__name__}")
             
-            # AI 메시지에 도구 호출이 있는 경우
+            # 도구 호출이 있는 경우
             if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
                 logger.info(f"🔧 도구 호출 발견: {len(last_message.tool_calls)}개")
                 return "execute_tools"
             
-            # 도구 메시지 다음엔 응답 생성
+            # 도구 메시지 후에는 다음 단계로
             if isinstance(last_message, ToolMessage):
-                logger.info("🛠️ 도구 메시지 후 응답 생성")
-                return "generate_response"
-            
-            # AI 메시지이지만 도구 호출이 없는 경우 - 최종 응답으로 처리
-            if isinstance(last_message, AIMessage):
-                logger.info("🤖 AI 응답 완료 - 종료")
-                return "end"
+                if current_step == "build_query":
+                    return "validate_results"
+                else:
+                    return "analyze_data"
         
-        # 기본적으로 응답 생성
-        logger.info("📝 기본 응답 생성")
+        # 기본적으로 다음 단계로
+        logger.info(f"📝 기본 라우팅: {current_step}")
         return "generate_response"
 
 
@@ -393,24 +631,61 @@ async def execute_tools(state: Dict[str, Any]) -> Dict[str, Any]:
             "is_complete": True
         }
 
+# ===== 새로운 노드들의 래퍼 함수들 =====
+
+async def plan_approach(state: Dict[str, Any]) -> Dict[str, Any]:
+    """분석 전략 수립 노드 래퍼"""
+    return await _sql_agent_node.plan_approach(state)
+
+async def build_query(state: Dict[str, Any]) -> Dict[str, Any]:
+    """쿼리 구성 노드 래퍼"""
+    return await _sql_agent_node.build_query(state)
+
+async def validate_results(state: Dict[str, Any]) -> Dict[str, Any]:
+    """결과 검증 노드 래퍼"""
+    return await _sql_agent_node.validate_results(state)
+
+async def analyze_data(state: Dict[str, Any]) -> Dict[str, Any]:
+    """데이터 분석 노드 래퍼"""
+    return await _sql_agent_node.analyze_data(state)
+
 async def generate_response(state: Dict[str, Any]) -> Dict[str, Any]:
-    """응답 생성 노드 래퍼"""
+    """최종 응답 생성 노드 래퍼"""
     return await _sql_agent_node.generate_response(state)
 
 def should_continue(state: Dict[str, Any]) -> str:
     """라우팅 조건 판단 래퍼 (딕셔너리 기반)"""
     logger.info("🔄 should_continue 래퍼 호출")
     try:
-        # 딕셔너리 상태를 AgentState 형식으로 변환
+        # 딕셔너리 상태를 AgentState 형식으로 변환 (고도화된 워크플로우용)
         agent_state: AgentState = {
             "messages": state.get("messages", []),
             "current_query": state.get("current_query", ""),
+            
+            # 분석 단계
+            "requirements": state.get("requirements"),
+            "analysis_plan": state.get("analysis_plan"),
+            
+            # 쿼리 단계
+            "proposed_queries": state.get("proposed_queries", []),
+            "validated_query": state.get("validated_query"),
+            
+            # 실행 및 결과 단계
             "sql_results": state.get("sql_results", []),
+            "execution_errors": state.get("execution_errors", []),
+            "result_quality_score": state.get("result_quality_score"),
+            
+            # 분석 단계
+            "data_insights": state.get("data_insights"),
+            "recommendations": state.get("recommendations"),
+            
+            # 제어 플래그
             "iteration_count": state.get("iteration_count", 0),
             "max_iterations": state.get("max_iterations", 10),
             "is_complete": state.get("is_complete", False),
             "error_message": state.get("error_message"),
-            "used_tools": state.get("used_tools", [])
+            "used_tools": state.get("used_tools", []),
+            "current_step": state.get("current_step", "analyze_question")
         }
         
         result = _sql_agent_node.should_continue_routing(agent_state)

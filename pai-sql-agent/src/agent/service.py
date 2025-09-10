@@ -194,9 +194,20 @@ class SQLAgentService:
                     initial_state = existing_state.values.copy()
                     initial_state["current_query"] = question
                     
-                    # 새로운 질문이므로 완료 상태를 리셋
+                    # 새로운 질문이므로 상태 리셋
                     initial_state["is_complete"] = False
                     initial_state["error_message"] = None
+                    initial_state["current_step"] = "analyze_question"
+                    
+                    # 고도화된 워크플로우 상태 리셋
+                    initial_state["requirements"] = None
+                    initial_state["analysis_plan"] = None
+                    initial_state["proposed_queries"] = []
+                    initial_state["validated_query"] = None
+                    initial_state["execution_errors"] = []
+                    initial_state["result_quality_score"] = None
+                    initial_state["data_insights"] = None
+                    initial_state["recommendations"] = None
                     
                     # 불완전한 tool call 상태 정리
                     messages = initial_state.get("messages", [])

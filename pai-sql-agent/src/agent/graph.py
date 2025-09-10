@@ -121,15 +121,15 @@ async def create_sql_agent_graph(enable_checkpointer: bool = True):
     # 그래프 생성
     workflow = StateGraph(AgentState)
     
-    # 노드 추가
-    workflow.add_node("analyze_question", analyze_question)
-    workflow.add_node("execute_tools", execute_tools)
-    workflow.add_node("generate_response", generate_response)
+    # 간소화된 3단계 노드 추가
+    workflow.add_node("analyze_question", analyze_question)      # 1단계: 질문 분석 & 쿼리 생성
+    workflow.add_node("execute_tools", execute_tools)           # 2단계: 쿼리 실행
+    workflow.add_node("generate_response", generate_response)   # 3단계: 최종 응답
     
-    # 엣지 추가
+    # 시작점 설정
     workflow.add_edge(START, "analyze_question")
     
-    # 조건부 엣지 추가
+    # 간소화된 조건부 엣지 설정
     workflow.add_conditional_edges(
         "analyze_question",
         should_continue,
@@ -144,8 +144,8 @@ async def create_sql_agent_graph(enable_checkpointer: bool = True):
         "execute_tools",
         should_continue,
         {
-            "execute_tools": "execute_tools",
             "generate_response": "generate_response",
+            "execute_tools": "execute_tools",  # 재실행 가능
             "end": END
         }
     )
@@ -154,8 +154,6 @@ async def create_sql_agent_graph(enable_checkpointer: bool = True):
         "generate_response",
         should_continue,
         {
-            "execute_tools": "execute_tools",
-            "generate_response": "generate_response",
             "end": END
         }
     )
