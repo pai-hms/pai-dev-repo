@@ -1,176 +1,146 @@
 """
-SQL Agent 프롬프트 관리
-시스템 프롬프트, 스키마 정보, 사용자 프롬프트 템플릿을 한 파일에 관리
+간소화된 SQL Agent 프롬프트 관리
 """
 
-# 테이블 스키마 정보
-TABLE_SCHEMA_INFO = """
-## 데이터베이스 스키마 정보
+# 핵심 스키마 정보만 포함
+DATABASE_SCHEMA_INFO = """
+## 주요 테이블
 
-### 1. population_stats (인구 통계)
-- year: 기준연도 (2015-2023)
-- adm_cd: 행정구역코드 (2자리: 시도, 5자리: 시군구, 8자리: 읍면동)
-- adm_nm: 행정구역명
-- tot_ppltn: 총인구
-- avg_age: 평균나이(세)
-- ppltn_dnsty: 인구밀도(명/㎢)
-- aged_child_idx: 노령화지수(일백명당 명)
-- oldage_suprt_per: 노년부양비(일백명당 명)
-- juv_suprt_per: 유년부양비(일백명당 명)
-- male_ppltn: 남자인구
-- female_ppltn: 여자인구
-- age_0_14: 0-14세 인구
-- age_15_64: 15-64세 인구
-- age_65_over: 65세 이상 인구
+### population_stats (인구 통계, 2015-2023)
+- year, adm_cd, adm_nm, tot_ppltn, avg_age, male_ppltn, female_ppltn
 
-### 2. household_stats (가구 통계)
-- year: 기준연도 (2015-2023)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- household_cnt: 가구수
-- avg_household_size: 평균 가구원수
-- one_person_household: 1인 가구수
-- elderly_household: 고령자 가구수
+### household_stats (가구 통계, 2015-2023)  
+- year, adm_cd, adm_nm, household_cnt, avg_household_size, one_person_household
 
-### 3. house_stats (주택 통계)
-- year: 기준연도 (2015-2023)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- house_cnt: 주택수
-- apartment_cnt: 아파트수
-- detached_house_cnt: 단독주택수
-- row_house_cnt: 연립주택수
-
-### 4. company_stats (사업체 통계)
-- year: 기준연도 (2000-2023)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- company_cnt: 사업체수
-- employee_cnt: 종사자수
-
-### 5. farm_household_stats (농가 통계)
-- year: 기준연도 (2000, 2005, 2010, 2015, 2020)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- farm_cnt: 농가수(가구)
-- population: 농가인구수(명)
-- avg_population: 농가 평균 인구수(명)
-
-### 6. forestry_household_stats (임가 통계)
-- year: 기준연도 (2000, 2005, 2010, 2015, 2020)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- forestry_cnt: 임가수(가구)
-- population: 임가인구수(명)
-- avg_population: 임가 평균 인구수(명)
-
-### 7. fishery_household_stats (어가 통계)
-- year: 기준연도 (2000, 2005, 2010, 2015, 2020)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- oga_div: 어가구분(0:전체, 1:내수면, 2:해수면)
-- fishery_cnt: 어가수(가구)
-- population: 어가인구수(명)
-- avg_population: 어가 평균 인구수(명)
-
-### 8. industry_code_stats (산업분류별 통계)
-- year: 기준연도 (2021-2023)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- industry_cd: 산업분류코드
-- industry_nm: 산업분류명
-- company_cnt: 사업체수
-- employee_cnt: 종사자수
-
-### 9. household_member_stats (가구원 통계)
-- year: 기준연도 (2000, 2005, 2010, 2015, 2020)
-- adm_cd: 행정구역코드
-- adm_nm: 행정구역명
-- data_type: 가구타입(1:농가, 2:임가, 3:해수면어가, 4:내수면어가)
-- gender: 성별(0:총합, 1:남자, 2:여자)
-- age_from: 나이(from)
-- age_to: 나이(to)
-- population: 가구원수(명)
-
-### 행정구역코드 예시
-- 서울특별시: '11'
-- 경상북도: '47'
-- 포항시: '47110'
-- 포항시 남구: '47111'
-- 포항시 북구: '47113'
+### company_stats (사업체 통계, 2000-2023)
+- year, adm_cd, adm_nm, company_cnt, employee_cnt
 
 ### 주요 지역 코드
-- 서울특별시: '11'
-- 부산광역시: '26'
-- 대구광역시: '27'
-- 인천광역시: '28'
-- 광주광역시: '29'
-- 대전광역시: '30'
-- 울산광역시: '31'
-- 세종특별자치시: '36'
-- 경기도: '41'
-- 강원도: '42'
-- 충청북도: '43'
-- 충청남도: '44'
-- 전라북도: '45'
-- 전라남도: '46'
-- 경상북도: '47'
-- 경상남도: '48'
-- 제주특별자치도: '50'
+- 서울특별시: '11', 경기도: '41', 부산광역시: '26'
+- 포항시 남구: '47111', 포항시 북구: '47113'
 """
 
-# 시스템 프롬프트
+# RAG 체인용 간소화된 프롬프트들
+
+# 1. 간결한 질문 분석 프롬프트
+QUESTION_ANALYSIS_PROMPT = f"""
+질문을 분석하고 처리 전략을 결정하세요.
+
+질문: {{question}}
+
+## 데이터베이스 스키마
+{DATABASE_SCHEMA_INFO}
+
+## 분석하여 전략을 결정하세요:
+
+### 전략 옵션
+- DIRECT_SQL: 명확한 지역+연도+지표 (예: "2023년 서울 인구", "경기도 사업체 수")
+- SEMANTIC_SEARCH: 모호한 표현, 비교 필요 (예: "가장 높은", "비교")
+- MULTI_STEP: 복합 분석, 계산 필요 (예: "비율", "증가율")
+- REFUSE: 데이터 범위 외
+
+## 출력 형식 (간결하게)
+전략: [DIRECT_SQL/SEMANTIC_SEARCH/MULTI_STEP/REFUSE]
+복잡도: [SIMPLE/COMPLEX/ANALYTICAL]
+필요 데이터: [테이블명]
+주의사항: [있을 경우만]
+"""
+
+# 2. 고도화된 SQL 생성 프롬프트
+SQL_GENERATION_PROMPT = f"""
+통계 분석 전문가로서 정확하고 효율적인 SQL 쿼리를 생성하세요.
+
+## 입력 정보
+질문: {{question}}
+분석 결과: {{analysis_result}}
+검색 컨텍스트: {{context}}
+복잡도: {{complexity}}
+
+## 데이터베이스 스키마
+{DATABASE_SCHEMA_INFO}
+
+## 고급 쿼리 생성 규칙
+
+### 1. 기본 원칙
+- PostgreSQL 문법 준수
+- 성능 최적화된 쿼리
+- 명확한 WHERE 조건
+- 적절한 정렬 및 제한
+
+### 2. 복잡도별 처리
+- SIMPLE: 단순 SELECT
+- COMPLEX: JOIN, UNION 활용
+- ANALYTICAL: 윈도우 함수, 집계 함수
+
+### 3. 데이터 품질 보장
+- NULL 값 처리
+- 중복 제거 (DISTINCT)
+- 유효한 범위 필터링
+- 결과 검증 가능한 형태
+
+## 출력 형식
+```sql
+-- 쿼리 목적: [설명]
+-- 예상 결과: [건수와 형태]
+[SQL 쿼리]
+```
+
+검증 체크리스트:
+- [ ] 문법 정확성
+- [ ] 논리적 타당성  
+- [ ] 성능 효율성
+- [ ] 결과 해석 가능성
+"""
+
+# 3. 간결한 답변 생성 프롬프트
+ANSWER_GENERATION_PROMPT = """
+사용자 질문에 대해 간결하고 명확하게 답변하세요.
+
+## 입력 정보
+질문: {question}
+SQL 쿼리: {sql_query}
+실행 결과: {sql_results}
+
+## 답변 형식 (간결하게)
+
+**{question}**
+
+{sql_results}
+
+위 데이터를 기반으로 답변:
+[질문에 대한 직접적이고 명확한 답변]
+
+## 답변 원칙
+1. 실제 데이터만 사용
+2. 간결하고 명확하게
+3. 핵심 내용만 포함
+4. 불필요한 설명 제거
+"""
+
+# 4. 거부 프롬프트
+REFUSAL_PROMPT = """
+다음 질문에 대해 데이터가 없어 답변할 수 없습니다.
+
+질문: {question}
+시도한 검색: {attempted_searches}
+
+정중하고 도움이 되는 거부 메시지를 생성하세요.
+대안 제안을 포함하세요.
+"""
+
+# 기존 호환성을 위한 시스템 프롬프트 (간소화)
 SYSTEM_PROMPT = f"""
-당신은 한국 센서스 통계 데이터를 분석하는 SQL 전문 어시스턴트입니다.
+당신은 한국 센서스 통계 데이터 전문 AI입니다.
 
-## 중요한 규칙
-**반드시 다음 단계를 따라 작업하세요:**
-1. 질문을 분석하고 필요한 데이터를 파악
-2. 적절한 SQL 쿼리 생성
-3. **execute_sql_query 함수를 반드시 호출하여 쿼리 실행**
-4. 실행 결과를 해석하고 사용자에게 답변 제공
+## 핵심 원칙
+1. 실제 데이터만 사용
+2. 추측 금지  
+3. 모르면 솔직히 거부
 
-**절대로 도구 호출 없이 추측하거나 가정하지 마세요. 모든 답변은 실제 데이터베이스 조회 결과를 기반으로 해야 합니다.**
+## 데이터베이스
+{DATABASE_SCHEMA_INFO}
 
-## 데이터베이스 정보
-{TABLE_SCHEMA_INFO}
-
-## 쿼리 작성 규칙
-1. PostgreSQL 문법을 사용하세요
-2. 항상 적절한 WHERE 조건을 포함하세요
-3. 성능을 위해 적절한 인덱스 컬럼을 활용하세요
-4. NULL 값 처리를 고려하세요
-5. 결과가 너무 많을 경우 LIMIT을 사용하세요
-
-## 사용 가능한 도구들
-1. **execute_sql_query**: SQL 쿼리 실행 및 결과 반환
-2. **get_table_info**: 테이블 스키마 정보 조회
-3. **get_available_tables**: 사용 가능한 테이블 목록
-4. **search_administrative_area**: 행정구역명으로 코드 검색
-5. **semantic_search**: AI 기반 의미 검색 (유사한 통계 데이터 찾기)
-6. **create_embeddings_for_stats**: 통계 데이터의 임베딩 생성
-7. **get_embedding_stats**: 임베딩 데이터베이스 현황 조회
-
-## 작업 프로세스
-1. **분석**: 질문에서 필요한 데이터와 테이블을 파악
-2. **의미 검색 고려**: 모호하거나 복합적인 질문의 경우 semantic_search 도구 사용 고려
-3. **쿼리 생성**: PostgreSQL 문법으로 SQL 쿼리 작성
-4. **실행**: execute_sql_query 함수로 쿼리 실행 (필수!)
-5. **해석**: 결과를 분석하고 인사이트 제공
-
-## 의미 검색 활용 가이드
-- "서울과 비슷한 지역" → semantic_search로 유사한 인구 패턴의 지역 찾기
-- "고령화가 심한 농촌 지역" → semantic_search로 관련 데이터 찾은 후 SQL 쿼리
-- "바다가 있는 경북 도시" → semantic_search로 지역 특성 기반 검색
-
-## 예시
-질문: "2023년 포항시의 인구는?"
-1. 분석: 2023년 포항시(행정구역코드: 47110)의 총인구를 조회해야 합니다.
-2. SQL: SELECT adm_nm, tot_ppltn FROM population_stats WHERE year = 2023 AND adm_cd = '47110';
-3. 실행: execute_sql_query 함수 호출 (반드시!)
-4. 해석: 결과를 바탕으로 포항시의 인구 현황 설명
-
-**기억하세요: 모든 통계 질문에 대해 반드시 execute_sql_query 함수를 호출해야 합니다!**
+반드시 도구를 사용해 실제 데이터를 조회한 후 답변하세요.
 """
 
 # ===== 단계별 전문 프롬프트들 =====
@@ -183,7 +153,7 @@ ANALYZE_QUESTION_PROMPT = f"""
 사용자의 질문을 정확히 이해하고 요구사항을 명확히 정의하세요.
 
 ## 데이터베이스 정보
-{TABLE_SCHEMA_INFO}
+{DATABASE_SCHEMA_INFO}
 
 ## 분석 결과 형식
 다음 형식으로 정확히 분석하세요:
@@ -324,5 +294,5 @@ GENERATE_FINAL_RESPONSE_PROMPT = """
 HUMAN_PROMPT = """
 사용자 질문: {question}
 
-위 질문에 대해 단계별로 분석하고 적절한 SQL 쿼리를 생성해 사용자 질문에 답변을 제공해주세요.
+위 질문에 대해 단계별로 분석하고 적절한 SQL 쿼리를 생성해 사용자 질문에 정확한 답변을 제공해주세요.
 """

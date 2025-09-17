@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from webapp.routers import agent, data
+from webapp.routers import agent, data, debug
 from webapp.models import ErrorResponse
 from src.config.settings import get_settings
 from src.database.connection import get_database_manager
@@ -61,6 +61,7 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(agent.router)
 app.include_router(data.router)
+app.include_router(debug.router)
 
 
 @app.get("/")

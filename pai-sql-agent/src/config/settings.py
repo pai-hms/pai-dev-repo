@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     
     # 데이터베이스 설정
     database_url: str = Field(
-        default="postgresql://pai_user:pai_password@localhost:5432/pai_sql_agent",
+        default="postgresql://postgres:password@localhost:5432/pai_sql_agent",
         description="데이터베이스 연결 URL"
     )
     

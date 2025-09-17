@@ -1,33 +1,41 @@
 """
-Agent 설정
-에이전트 관련 설정 관리 (프롬프트는 prompt.py로 분리됨)
+SQL Agent 설정 관리
 """
-from typing import Dict, Any, Optional
 from dataclasses import dataclass
-
 from src.config.settings import get_settings
 
-# 프롬프트는 prompt.py 파일에서 import
-from .prompt import SYSTEM_PROMPT, HUMAN_PROMPT, TABLE_SCHEMA_INFO
 
 @dataclass
 class AgentConfig:
-    """에이전트 설정"""
+    """Agent 설정"""
+    
+    # LLM 설정
     model_name: str = "gpt-4o-mini"
     temperature: float = 0.1
-    max_tokens: int = 4000
-    max_iterations: int = 10
+    max_tokens: int = 2000
     
-    # 스트리밍 설정
-    enable_streaming: bool = True
-    stream_mode: str = "messages"  # "messages" or "values"
+    # 워크플로우 설정
+    max_iterations: int = 3
+    timeout_seconds: int = 30
     
-    # 검증 설정
-    enable_query_validation: bool = True
-    max_query_length: int = 10000
+    # SQL 설정
+    max_result_rows: int = 50
+    query_timeout: int = 10
+
+
+_agent_config: AgentConfig = None
 
 
 def get_agent_config() -> AgentConfig:
-    """에이전트 설정 반환"""
-    return AgentConfig()
-
+    """Agent 설정 싱글톤 인스턴스"""
+    global _agent_config
+    
+    if _agent_config is None:
+        settings = get_settings()
+        _agent_config = AgentConfig(
+            model_name="gpt-4o-mini",  # 기본값 사용
+            temperature=0.1,
+            max_tokens=2000
+        )
+    
+    return _agent_config

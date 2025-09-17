@@ -91,6 +91,33 @@ def check_api_health() -> bool:
     except:
         return False
 
+def get_database_info() -> Dict[str, Any]:
+    """데이터베이스 상태 정보 조회"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/data/database-info", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def get_vector_db_info() -> Dict[str, Any]:
+    """벡터 데이터베이스 상태 정보 조회"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/data/vector-info", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def trigger_embedding_creation() -> Dict[str, Any]:
+    """임베딩 생성 트리거"""
+    try:
+        response = requests.post(f"{API_BASE_URL}/api/data/create-embeddings", timeout=60)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # ====== UI 시작 ======
 
 # 헤더
@@ -121,6 +148,73 @@ with st.sidebar:
     - 2023년 경기도의 사업체 수는?
     - 포항시 남구와 북구의 사업체 수 비교
     """)
+    
+    st.markdown("---")
+    st.header("🔧 데이터베이스 상태")
+    
+    # 데이터베이스 정보 확인
+    if st.button("📊 데이터베이스 상태 확인", key="db_info"):
+        with st.spinner("데이터베이스 정보 조회 중..."):
+            db_info = get_database_info()
+            
+            if db_info.get("success"):
+                st.success("✅ 데이터베이스 연결 성공!")
+                
+                # 테이블 정보 표시
+                if "tables" in db_info:
+                    st.write("**📋 테이블 목록:**")
+                    for table in db_info["tables"]:
+                        table_name = table.get("table_name", "Unknown")
+                        row_count = table.get("row_count", 0)
+                        st.write(f"• {table_name}: {row_count:,}개 레코드")
+                
+                # 최신 데이터 샘플
+                if "sample_data" in db_info:
+                    st.write("**🔍 최신 데이터 샘플:**")
+                    st.code(db_info["sample_data"], language="text")
+            else:
+                st.error(f"❌ 데이터베이스 오류: {db_info.get('error', 'Unknown')}")
+    
+    # 벡터 DB 정보 확인
+    if st.button("🧠 벡터 DB 상태 확인", key="vector_info"):
+        with st.spinner("벡터 DB 정보 조회 중..."):
+            vector_info = get_vector_db_info()
+            
+            if vector_info.get("success"):
+                st.success("✅ 벡터 DB 연결 성공!")
+                
+                total_embeddings = vector_info.get("total_embeddings", 0)
+                st.write(f"**🔢 총 임베딩 수:** {total_embeddings:,}개")
+                
+                if "tables" in vector_info:
+                    st.write("**📊 테이블별 임베딩:**")
+                    for table in vector_info["tables"]:
+                        source_table = table.get("source_table", "Unknown")
+                        count = table.get("count", 0)
+                        completion = table.get("completion_rate", 0)
+                        st.write(f"• {source_table}: {count}개 ({completion:.1f}%)")
+                
+                if "recent_embeddings" in vector_info:
+                    st.write("**🕒 최근 임베딩 예시:**")
+                    for emb in vector_info["recent_embeddings"][:3]:
+                        content = emb.get("content", "")[:50] + "..."
+                        st.write(f"• {content}")
+            else:
+                st.error(f"❌ 벡터 DB 오류: {vector_info.get('error', 'Unknown')}")
+    
+    # 임베딩 생성 버튼
+    if st.button("🔨 임베딩 생성/업데이트", key="create_embeddings"):
+        with st.spinner("임베딩 생성 중... (최대 2분 소요)"):
+            result = trigger_embedding_creation()
+            
+            if result.get("success"):
+                st.success(f"✅ 임베딩 생성 완료!")
+                if "message" in result:
+                    st.info(result["message"])
+                if "created_count" in result:
+                    st.write(f"생성된 임베딩 수: {result['created_count']}개")
+            else:
+                st.error(f"❌ 임베딩 생성 실패: {result.get('error', 'Unknown')}")
     
     st.markdown("---")
     

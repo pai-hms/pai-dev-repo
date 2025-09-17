@@ -25,7 +25,7 @@ class QueryResponse(BaseModel):
     success: bool
     message: str
     sql_queries: List[str] = []
-    results: List[Dict[str, Any]] = []
+    results: List[str] = []  # SQL 실행 결과 (문자열 형태)
     used_tools: List[ToolInfo] = []  # 사용된 도구 정보
     session_id: Optional[str] = None
     processing_time: Optional[float] = None
@@ -34,7 +34,7 @@ class QueryResponse(BaseModel):
 
 class StreamChunk(BaseModel):
     type: str
-    content: str
+    content: Any
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
