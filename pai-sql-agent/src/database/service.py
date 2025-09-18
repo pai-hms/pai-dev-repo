@@ -79,8 +79,8 @@ async def get_database_service() -> DatabaseService:
     global _database_service
     
     if _database_service is None:
-        # ✅ 수정: container.py의 함수 사용
-        from .container import get_database_service as get_service_from_container
-        _database_service = await get_service_from_container()
+        # ✅ 수정: 함수명 변경으로 재귀 호출 방지
+        from .container import get_database_service_from_container
+        _database_service = await get_database_service_from_container()
     
     return _database_service

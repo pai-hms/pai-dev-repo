@@ -5,7 +5,7 @@ Database 모듈 - 한국 통계청 데이터 관리
 
 from .connection import DatabaseManager, get_database_manager, get_async_session
 from .service import DatabaseService, get_database_service
-from .container import DatabaseContainer, get_database_container
+from .container import DatabaseContainer, get_database_container, get_database_service_from_container
 from .domains import StatisticsData, QueryResult
 
 __all__ = [
@@ -21,6 +21,7 @@ __all__ = [
     # Container
     "DatabaseContainer",
     "get_database_container",
+    "get_database_service_from_container", 
     
     # Domain Models
     "StatisticsData",

@@ -43,6 +43,6 @@ async def get_database_container() -> DatabaseContainer:
     return container
 
 
-async def get_database_service() -> DatabaseService:
+async def get_database_service_from_container() -> DatabaseService:
     """데이터베이스 서비스 인스턴스 반환"""
     return container.database_service()
