@@ -98,26 +98,6 @@ curl -X GET "http://localhost:8000/api/agent/session/my_session/history"
 curl -X DELETE "http://localhost:8000/api/agent/session/my_session"
 ```
 
-## 주요 기능
-
-- 자연어 질문을 SQL 쿼리로 변환
-- 실시간 스트리밍 응답
-- **AsyncPostgresSaver 메모리**: LangGraph 공식 PostgreSQL 체크포인터
-- **완전한 대화 기록 영속성**: 세션별 메모리 관리
-- **연속 대화 지원**: "내가 처음에 뭐 물어봤지?" 같은 질문 처리
-- SGIS API 통계 데이터 크롤링
-- FastAPI 기반 REST API
-- Streamlit 웹 인터페이스
-
-## 기술 스택
-
-- AI Framework: LangGraph, LangChain
-- LLM: OpenAI GPT-4o-mini
-- Database: PostgreSQL
-- Web Framework: FastAPI, Streamlit
-- Package Manager: uv
-- Containerization: Docker, Docker Compose
-
 ## 환경 변수
 
 ```bash
