@@ -279,32 +279,3 @@ class CrawlLog(Base, TimestampMixin):
         Index("idx_crawl_endpoint_status", "api_endpoint", "status"),
         Index("idx_crawl_created_at", "created_at"),
     )
-
-
-class AgentSession(Base):
-    """멀티턴 대화 세션 (SQL Agent 전용)"""
-    __tablename__ = "agent_sessions"
-    
-    session_id = Column(String, primary_key=True)
-    thread_id = Column(String, unique=True, nullable=False, index=True)
-    title = Column(String, nullable=False)
-    user_id = Column(String, nullable=True)  # 향후 사용자 인증시 활용
-    
-    # 타임스탬프
-    created_at = Column(TIMESTAMP, default=func.now(), nullable=False)
-    updated_at = Column(TIMESTAMP, default=func.now(), onupdate=func.now(), nullable=False)
-    last_activity = Column(TIMESTAMP, default=func.now(), nullable=False)
-    
-    # 세션 정보
-    message_count = Column(Integer, default=0, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    
-    # 메타데이터 (JSON 형태로 저장)
-    settings = Column(JSON, default={}, nullable=False)
-    
-    __table_args__ = (
-        Index("idx_agent_sessions_thread_id", "thread_id"),
-        Index("idx_agent_sessions_user_id", "user_id"),
-        Index("idx_agent_sessions_activity", "last_activity"),
-        Index("idx_agent_sessions_active", "is_active"),
-    )

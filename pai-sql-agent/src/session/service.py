@@ -95,28 +95,6 @@ class SessionService:
         """최근 세션 목록 조회"""
         return await self.repository.find_recent_sessions(limit, offset)
     
-    async def update_session_activity(
-        self, 
-        session_id: str, 
-        increment_message: bool = False
-    ) -> Optional[AgentSession]:
-        """세션 활동 업데이트"""
-        session = await self.repository.find_by_id(session_id)
-        if not session:
-            return None
-        
-        # 활동 시간 업데이트
-        session.update_activity()
-        
-        if increment_message:
-            session.increment_message_count()
-        
-        # 데이터베이스 업데이트
-        updated_session = await self.repository.update(session)
-        logger.info(f"세션 활동 업데이트: {session_id}")
-        
-        return updated_session
-    
     async def delete_session(self, session_id: str) -> bool:
         """세션 삭제"""
         success = await self.repository.delete(session_id)

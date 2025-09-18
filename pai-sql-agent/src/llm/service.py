@@ -284,14 +284,3 @@ async def get_llm_service(config: Optional[LLMConfig] = None) -> LLMService:
     return _llm_service
 
 
-def create_llm_service(config: Optional[LLMConfig] = None) -> LLMService:
-    """
-    새로운 LLM 서비스 인스턴스 생성 (싱글톤 무시)
-    
-    Args:
-        config: LLM 설정
-    
-    Returns:
-        새로운 LLM 서비스 인스턴스
-    """
-    return LLMService(config)
