@@ -9,10 +9,19 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.database.models import (
-    Base, PopulationStats, PopulationSearchStats, HouseholdStats, HouseStats, CompanyStats,
-    FarmHouseholdStats, ForestryHouseholdStats, FisheryHouseholdStats,
-    HouseholdMemberStats, CrawlLog, IndustryCodeStats
+from src.database.entities import (
+    Base,  # ✅ 추가: Base import
+    PopulationStats,
+    CompanyStats, 
+    HouseholdStats,
+    HouseStats,
+    FarmHouseholdStats,
+    ForestryHouseholdStats,
+    FisheryHouseholdStats,
+    HouseholdMemberStats,
+    PopulationSearchStats,
+    IndustryCodeStats,
+    CrawlLog,
 )
 
 

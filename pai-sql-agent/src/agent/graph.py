@@ -44,9 +44,9 @@ def create_sql_agent_workflow() -> StateGraph:
     
     # 에이전트 노드
     async def agent_node(state: SQLAgentState):
-        from .container import get_container
-        container = await get_container()
-        llm_service = await container.llm_service()
+        # ✅ 수정: 새로운 컨테이너 구조 사용
+        from .container import get_llm_service
+        llm_service = await get_llm_service()
         
         sql_agent = SQLAgentNode(llm_service, AVAILABLE_TOOLS)
         return await sql_agent(state)

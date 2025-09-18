@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
 from src.config.settings import get_settings
-from src.database.models import Base
+from src.database.entities import Base  # models → entities 변경
 
 
 class DatabaseManager:

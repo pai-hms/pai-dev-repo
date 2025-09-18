@@ -1,5 +1,5 @@
 """
-SQL Agent API 라우터 - 간소화된 버전
+SQL Agent API 라우터
 """
 import logging
 import json

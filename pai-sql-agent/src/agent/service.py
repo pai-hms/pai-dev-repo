@@ -10,7 +10,6 @@ from datetime import datetime
 from .graph import create_sql_agent_graph
 from .nodes import create_initial_state
 from .container import get_container
-from src.session.service import get_session_service
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +44,14 @@ class SQLAgentService:
         
         try:
             # DI 컨테이너 초기화
-            await get_container()
+            container = await get_container()
             
             # SQL Agent 그래프 생성
             self._agent_graph = await create_sql_agent_graph()
             
-            # 세션 서비스 초기화
-            self._session_service = await get_session_service()
+            # 세션 서비스 초기화 (컨테이너에서 가져오기)
+            from .container import get_session_service
+            self._session_service = await get_session_service()  # ✅ 수정
             
             self._initialized = True
             logger.info("SQL Agent 서비스 초기화 완료")

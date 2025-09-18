@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, Integer, TIMESTAMP, Boolean, JSON
 from sqlalchemy.sql import func
 
-from src.database.models import Base
+from src.database.entities import Base
 from .domains import AgentSession
 
 logger = logging.getLogger(__name__)

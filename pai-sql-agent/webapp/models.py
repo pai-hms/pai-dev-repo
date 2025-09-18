@@ -73,29 +73,6 @@ class HealthResponse(BaseModel):
 
 # 추가된 모델들 (data.py에서 필요한 모델들)
 
-class TableInfoResponse(BaseModel):
-    """테이블 정보 응답"""
-    table_name: str
-    columns: List[Dict[str, Any]]
-    sample_data: List[Dict[str, Any]] = []
-    row_count: Optional[int] = None
-    description: Optional[str] = None
-
-
-class AdminAreaSearchRequest(BaseModel):
-    """행정구역 검색 요청"""
-    keyword: str = Field(..., description="검색할 행정구역 키워드")
-    level: Optional[str] = Field(None, description="행정구역 레벨 (sido, sigungu, dong)")
-    limit: Optional[int] = Field(10, description="최대 결과 수")
-
-
-class AdminAreaSearchResponse(BaseModel):
-    """행정구역 검색 응답"""
-    areas: List[Dict[str, str]] = Field(default_factory=list)
-    total_count: int = Field(0)
-    search_keyword: str
-
-
 class DatabaseSchemaResponse(BaseModel):
     """데이터베이스 스키마 응답"""
     tables: List[Dict[str, Any]]
@@ -109,20 +86,3 @@ class TableSchemaResponse(BaseModel):
     columns: List[Dict[str, Any]]
     indexes: List[Dict[str, Any]] = []
     constraints: List[Dict[str, Any]] = []
-
-
-class StatisticsResponse(BaseModel):
-    """통계 데이터 응답"""
-    data: List[Dict[str, Any]]
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    query_info: Optional[Dict[str, Any]] = None
-    processing_time: Optional[float] = None
-
-
-class SGISDataResponse(BaseModel):
-    """SGIS API 데이터 응답"""
-    success: bool
-    data: List[Dict[str, Any]] = []
-    total_count: int = 0
-    api_endpoint: str
-    error_message: Optional[str] = None

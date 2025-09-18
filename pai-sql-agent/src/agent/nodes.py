@@ -153,9 +153,9 @@ class SQLResponseNode:
     async def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
         """SQL 결과를 바탕으로 사용자 친화적 응답 생성"""
         try:
-            from .container import get_container
-            container = await get_container()
-            llm_service = await container.llm_service()
+            # ✅ 수정: 새로운 컨테이너 구조 사용
+            from .container import get_llm_service
+            llm_service = await get_llm_service()
             
             # 현재 상태에서 정보 추출
             query = state.get("query", "")

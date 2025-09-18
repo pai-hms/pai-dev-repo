@@ -1,5 +1,5 @@
 """
-데이터베이스 모델 정의
+데이터베이스 엔티티 정의 (DAO Layer)
 통계청 및 SGIS API 데이터를 저장하기 위한 SQLAlchemy 모델들
 """
 from datetime import datetime
