@@ -19,24 +19,40 @@ async def sql_db_query(query: str) -> str:
     Returns:
         쿼리 실행 결과
     """
+    # ✅ 추가: 도구 호출 상세 로깅
+    logger.info("=" * 80)
+    logger.info("🔧 SQL_DB_QUERY 도구 호출됨")
+    logger.info(f"📝 받은 SQL 쿼리:")
+    logger.info(f"   {query}")
+    logger.info("=" * 80)
+    
     try:
         from .container import get_container
         
         container = await get_container()
         db_manager = await container.database_manager()
         
+        logger.info("🔌 데이터베이스 연결 시작...")
+        
         # SQL 실행
         async with db_manager.get_async_session() as session:
             from src.database.repository import DatabaseService
             db_service = DatabaseService(session)
+            
+            logger.info("🚀 SQL 쿼리 실행 시작...")
             results = await db_service.execute_raw_query(query)
             
+            logger.info(f"📊 쿼리 실행 완료 - 결과 수: {len(results) if results else 0}")
+            
             if not results:
+                logger.info("⚠️ 결과 없음 - 빈 결과 반환")
                 return "쿼리 실행 결과: 데이터 없음"
             
             # 결과 포맷팅
             if isinstance(results, list) and results:
                 columns = list(results[0].keys())
+                logger.info(f"📋 결과 컬럼: {columns}")
+                
                 header = " | ".join(columns)
                 
                 rows = []
@@ -57,18 +73,24 @@ async def sql_db_query(query: str) -> str:
                 if len(results) > 10:
                     result += f"\n... (총 {len(results)}개 중 10개만 표시)"
                 
+                logger.info("✅ 결과 포맷팅 완료")
+                logger.info(f"📤 반환할 결과:")
+                logger.info(f"   {result[:200]}...")
+                
                 return result
             else:
+                logger.info(f"📤 단순 결과 반환: {str(results)}")
                 return str(results)
                 
     except Exception as e:
-        logger.error(f"SQL 쿼리 실행 오류: {e}")
+        logger.error(f"❌ SQL 실행 오류: {e}")
         return f"Error: {str(e)}"
 
 
 @tool
 def get_database_schema() -> str:
     """데이터베이스 스키마 정보 반환"""
+    logger.info("📋 데이터베이스 스키마 정보 요청됨")
     from src.agent.prompt import DATABASE_SCHEMA_INFO
     return DATABASE_SCHEMA_INFO
 

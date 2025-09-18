@@ -141,27 +141,27 @@ class SQLAgentService:
                 ):
                     chunk_count += 1
                     
-                    # **핵심 디버깅: chunk 구조 완전 분석**
-                    logger.info(f"📦 Chunk #{chunk_count}")
-                    logger.info(f"   Type: {type(chunk)}")
-                    logger.info(f"   Value: {chunk}")
-                    logger.info(f"   Has 'content': {hasattr(chunk, 'content') if hasattr(chunk, '__dict__') else 'N/A'}")
-                    logger.info(f"   Has 'type': {hasattr(chunk, 'type') if hasattr(chunk, '__dict__') else 'N/A'}")
+                    # # **핵심 디버깅: chunk 구조 완전 분석**
+                    # logger.info(f"📦 Chunk #{chunk_count}")
+                    # logger.info(f"   Type: {type(chunk)}")
+                    # logger.info(f"   Value: {chunk}")
+                    # logger.info(f"   Has 'content': {hasattr(chunk, 'content') if hasattr(chunk, '__dict__') else 'N/A'}")
+                    # logger.info(f"   Has 'type': {hasattr(chunk, 'type') if hasattr(chunk, '__dict__') else 'N/A'}")
                     
-                    if hasattr(chunk, '__dict__'):
-                        logger.info(f"   Attributes: {list(chunk.__dict__.keys())}")
-                    elif isinstance(chunk, dict):
-                        logger.info(f"   Dict keys: {list(chunk.keys())}")
-                    elif isinstance(chunk, (list, tuple)):
-                        logger.info(f"   Length: {len(chunk)}")
-                        if chunk:
-                            logger.info(f"   First item type: {type(chunk[0])}")
+                    # if hasattr(chunk, '__dict__'):
+                    #     logger.info(f"   Attributes: {list(chunk.__dict__.keys())}")
+                    # elif isinstance(chunk, dict):
+                    #     logger.info(f"   Dict keys: {list(chunk.keys())}")
+                    # elif isinstance(chunk, (list, tuple)):
+                    #     logger.info(f"   Length: {len(chunk)}")
+                    #     if chunk:
+                    #         logger.info(f"   First item type: {type(chunk[0])}")
                     
                     # **방법 1: 기존 방식**
                     if hasattr(chunk, 'content') and hasattr(chunk, 'type'):
                         if chunk.type == "ai" and chunk.content:
                             token_count += 1
-                            logger.info(f"🟢 토큰 #{token_count}: '{chunk.content[:50]}...'")
+                            # logger.info(f"🟢 토큰 #{token_count}: '{chunk.content[:50]}...'")
                             
                             yield {
                                 "type": "token",
@@ -173,7 +173,7 @@ class SQLAgentService:
                     elif isinstance(chunk, dict):
                         if chunk.get("type") == "ai" and chunk.get("content"):
                             token_count += 1
-                            logger.info(f"🟢 토큰(dict) #{token_count}: '{chunk.get('content')[:50]}...'")
+                            # logger.info(f"🟢 토큰(dict) #{token_count}: '{chunk.get('content')[:50]}...'")
                             
                             yield {
                                 "type": "token",
@@ -183,9 +183,9 @@ class SQLAgentService:
                     
                     # **방법 3: 리스트 형태**
                     elif isinstance(chunk, list):
-                        logger.info(f"📝 리스트 처리 중... (길이: {len(chunk)})")
+                        # logger.info(f"📝 리스트 처리 중... (길이: {len(chunk)})")
                         for i, message in enumerate(chunk):
-                            logger.info(f"   Item #{i}: {type(message)} - {message}")
+                            # logger.info(f"   Item #{i}: {type(message)} - {message}")
                             
                             if (hasattr(message, 'content') and 
                                 hasattr(message, 'type') and 
@@ -193,7 +193,7 @@ class SQLAgentService:
                                 message.content):
                                 
                                 token_count += 1
-                                logger.info(f"🟢 토큰(list) #{token_count}: '{message.content[:50]}...'")
+                                # logger.info(f"🟢 토큰(list) #{token_count}: '{message.content[:50]}...'")
                                 
                                 yield {
                                     "type": "token",
@@ -203,12 +203,12 @@ class SQLAgentService:
                     
                     # **방법 4: 튜플 형태 (공식 예제) - 응답 노드만 필터링**
                     elif isinstance(chunk, tuple) and len(chunk) >= 1:
-                        logger.info(f"🔗 튜플 처리 중... (길이: {len(chunk)})")
+                        # logger.info(f"🔗 튜플 처리 중... (길이: {len(chunk)})")
                         message = chunk[0] if len(chunk) > 0 else None
                         metadata = chunk[1] if len(chunk) > 1 else None
                         
-                        logger.info(f"   Message: {type(message)} - {message}")
-                        logger.info(f"   Node: {metadata.get('langgraph_node', 'UNKNOWN') if metadata else 'NO_METADATA'}")
+                        # logger.info(f"   Message: {type(message)} - {message}")
+                        # logger.info(f"   Node: {metadata.get('langgraph_node', 'UNKNOWN') if metadata else 'NO_METADATA'}")
                         
                         if message and hasattr(message, 'content'):
                             logger.info(f"   Content: '{message.content[:50]}...'")
@@ -222,7 +222,7 @@ class SQLAgentService:
                             metadata.get('langgraph_node') == 'response'):  # 🔑 응답 노드만
                             
                             token_count += 1
-                            logger.info(f"🟢 토큰(response) #{token_count}: '{message.content}'")
+                            # logger.info(f"🟢 토큰(response) #{token_count}: '{message.content}'")
                             
                             yield {
                                 "type": "token",
@@ -233,7 +233,7 @@ class SQLAgentService:
                         # 다른 노드 정보는 상태 업데이트로
                         elif metadata and metadata.get('langgraph_node'):
                             node_name = metadata.get('langgraph_node')
-                            logger.info(f"📍 노드 업데이트: {node_name}")
+                            # logger.info(f"📍 노드 업데이트: {node_name}")
                             
                             yield {
                                 "type": "node_update",
