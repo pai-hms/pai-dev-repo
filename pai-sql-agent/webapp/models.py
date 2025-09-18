@@ -5,12 +5,15 @@ from pydantic import BaseModel, Field
 
 class QueryRequest(BaseModel):
     question: str
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None  # 하위 호환성
+    thread_id: Optional[str] = None   # 멀티턴 대화용
     stream: bool = False
+    stream_mode: Optional[str] = "messages"  # LangGraph 스트리밍 모드: messages, updates, values, all
+    request_type: Optional[str] = None  # 요청 분류 타입: sql, general, None=자동분류
 
 
 class ToolInfo(BaseModel):
-    """사용된 도구 정보"""
+    """도구 실행 정보"""
     tool_name: str
     tool_function: str
     tool_description: str
@@ -25,42 +28,101 @@ class QueryResponse(BaseModel):
     success: bool
     message: str
     sql_queries: List[str] = []
-    results: List[str] = []  # SQL 실행 결과 (문자열 형태)
-    used_tools: List[ToolInfo] = []  # 사용된 도구 정보
+    query_results: List[Dict[str, Any]] = []
+    tools_used: List[ToolInfo] = []
     session_id: Optional[str] = None
+    thread_id: Optional[str] = None
     processing_time: Optional[float] = None
-    error_message: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class StreamChunk(BaseModel):
-    type: str
+    """스트리밍 응답 청크"""
+    type: str  # token, tool_start, tool_end, node_update, state_update, complete, error
     content: Any
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
+class SessionInfo(BaseModel):
+    """세션 정보"""
+    session_id: str
+    thread_id: str
+    title: str
+    created_at: datetime
+    last_activity: datetime
+    message_count: int
+    is_active: bool
+
+
+class ErrorResponse(BaseModel):
+    """오류 응답"""
+    error: str
+    detail: Optional[str] = None
+    error_code: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class HealthResponse(BaseModel):
+    """헬스체크 응답"""
+    status: str
+    timestamp: datetime = Field(default_factory=datetime.now)
+    version: Optional[str] = None
+    services: Dict[str, str] = Field(default_factory=dict)
+
+
+# 추가된 모델들 (data.py에서 필요한 모델들)
+
 class TableInfoResponse(BaseModel):
+    """테이블 정보 응답"""
     table_name: str
     columns: List[Dict[str, Any]]
+    sample_data: List[Dict[str, Any]] = []
+    row_count: Optional[int] = None
     description: Optional[str] = None
 
 
 class AdminAreaSearchRequest(BaseModel):
-    search_term: str
+    """행정구역 검색 요청"""
+    keyword: str = Field(..., description="검색할 행정구역 키워드")
+    level: Optional[str] = Field(None, description="행정구역 레벨 (sido, sigungu, dong)")
+    limit: Optional[int] = Field(10, description="최대 결과 수")
 
 
 class AdminAreaSearchResponse(BaseModel):
-    results: List[Dict[str, str]]
+    """행정구역 검색 응답"""
+    areas: List[Dict[str, str]] = Field(default_factory=list)
+    total_count: int = Field(0)
+    search_keyword: str
 
 
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: datetime = Field(default_factory=datetime.now)
-    database_connected: bool
-    sgis_api_connected: bool
+class DatabaseSchemaResponse(BaseModel):
+    """데이터베이스 스키마 응답"""
+    tables: List[Dict[str, Any]]
+    total_tables: int
+    database_name: str
 
 
-class ErrorResponse(BaseModel):
-    success: bool = False
-    error_code: str
-    error_message: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+class TableSchemaResponse(BaseModel):
+    """테이블 스키마 응답"""
+    table_name: str
+    columns: List[Dict[str, Any]]
+    indexes: List[Dict[str, Any]] = []
+    constraints: List[Dict[str, Any]] = []
+
+
+class StatisticsResponse(BaseModel):
+    """통계 데이터 응답"""
+    data: List[Dict[str, Any]]
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    query_info: Optional[Dict[str, Any]] = None
+    processing_time: Optional[float] = None
+
+
+class SGISDataResponse(BaseModel):
+    """SGIS API 데이터 응답"""
+    success: bool
+    data: List[Dict[str, Any]] = []
+    total_count: int = 0
+    api_endpoint: str
+    error_message: Optional[str] = None

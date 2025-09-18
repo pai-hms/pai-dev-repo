@@ -1,298 +1,432 @@
 """
-간소화된 SQL Agent 프롬프트 관리
+에이전트 프롬프트 템플릿 모음
+한국 통계청 데이터 분석을 위한 프롬프트와 템플릿들을 관리
+
+설계 원칙:
+- KISS 원칙: 간단한 프롬프트 구조
+- 데이터와 로직 일체화: 프롬프트와 관련된 모든 로직을 한 곳에 집중
+- Open-Closed Principle: 새 프롬프트 추가에 열려있고, 기존 코드 수정에 닫혀있음
 """
 
-# 핵심 스키마 정보만 포함
+from typing import Dict, Any
+
+# ========================================
+# 데이터베이스 스키마 정보 (실제 DB 기반)
+# ========================================
+
 DATABASE_SCHEMA_INFO = """
-## 주요 테이블
+**한국 통계청 데이터베이스 스키마** 
 
-### population_stats (인구 통계, 2015-2023)
-- year, adm_cd, adm_nm, tot_ppltn, avg_age, male_ppltn, female_ppltn
+**1. population_stats (인구 통계 - 인구주택총조사 기반)**
+   기본 정보: year, adm_cd, adm_nm
+   인구 데이터: tot_ppltn(총인구), male_ppltn, female_ppltn, avg_age
+   연령별: age_0_14, age_15_64, age_65_over  
+   가구: tot_family, avg_fmember_cnt, tot_house
+   산업: employee_cnt(종업원수), corp_cnt(사업체수) 
+   농림어업: nongga_cnt, imga_cnt, naesuoga_cnt, haesuoga_cnt
 
-### household_stats (가구 통계, 2015-2023)  
-- year, adm_cd, adm_nm, household_cnt, avg_household_size, one_person_household
+**2. company_stats (사업체 현황 통계)**
+   기본 정보: year, adm_cd, adm_nm
+   사업체: company_cnt(사업체수), employee_cnt(종업원수) 
 
-### company_stats (사업체 통계, 2000-2023)
-- year, adm_cd, adm_nm, company_cnt, employee_cnt
+**3. household_stats (가구 현황 통계)**  
+   기본 정보: year, adm_cd, adm_nm
+   가구: household_cnt(가구수), avg_household_size(평균가구원수) 
+   특수가구: one_person_household, elderly_household
 
-### 주요 지역 코드
-- 서울특별시: '11', 경기도: '41', 부산광역시: '26'
-- 포항시 남구: '47111', 포항시 북구: '47113'
+**4. house_stats (주택 현황 통계)**
+   기본 정보: year, adm_cd, adm_nm
+   주택: house_cnt(주택수), apartment_cnt, detached_house_cnt, row_house_cnt
+
+**5. farm_household_stats (농가 현황 통계)**
+   기본 정보: year, adm_cd, adm_nm
+   농가: farm_cnt(농가수), population(농가인구), avg_population
+
+**6. forestry_household_stats (임가 현황 통계)**
+   기본 정보: year, adm_cd, adm_nm
+   임가: forestry_cnt(임가수), population(임가인구), avg_population
+
+**7. fishery_household_stats (어가 현황 통계)**
+   기본 정보: year, adm_cd, adm_nm, oga_div(어가구분)
+   어가: fishery_cnt(어가수), population(어가인구), avg_population
+
+**8. household_member_stats (가구원 현황 통계)**
+   기본 정보: year, adm_cd, adm_nm, data_type, gender, age_from, age_to
+   가구원: population(가구원수)
+
+**주요 테이블별 용도:**
+- **인구 조회**: population_stats (가장 포괄적인 데이터)
+- **사업체 조회**: company_stats 또는 population_stats (둘 다 사용 가능)
+- **가구원수 조회**: household_stats (avg_household_size 컬럼)
+
+**행정구역코드:**
+- 서울: '11' / 경기: '41' / 부산: '47' 
+- 부산 해운대구: '47111' / 부산 수영구: '47113'
+
+**컬럼 주의사항:**
+population_stats: corp_cnt (사업체수)
+company_stats: company_cnt (사업체수)  
+household_stats: avg_household_size (평균가구원수)
+
+최신 데이터는 2023년 기준!
 """
 
-# RAG 체인용 간소화된 프롬프트들
+# ========================================
+# 행정구역 코드 매핑 정보
+# ========================================
 
-# 1. 간결한 질문 분석 프롬프트
-QUESTION_ANALYSIS_PROMPT = f"""
-질문을 분석하고 처리 전략을 결정하세요.
+REGION_CODE_MAPPING = """
+### 행정구역 코드 체계
+- **전국**: null 또는 공백
+- **시도(2자리)**: 서울(11), 부산(26), 대구(27), 인천(28), 광주(29), 대전(30), 울산(31), 세종(36), 경기(41), 강원(42), 충북(43), 충남(44), 전북(45), 전남(46), 경북(47), 경남(48), 제주(50)
+- **시군구(5자리)**: 시도코드 + 시군구코드 (예: 서울 종로구 11110)
+- **읍면동(8자리)**: 시군구코드 + 읍면동코드 (예: 서울 종로구 청운효자동 11110101)
 
-질문: {{question}}
-
-## 데이터베이스 스키마
-{DATABASE_SCHEMA_INFO}
-
-## 분석하여 전략을 결정하세요:
-
-### 전략 옵션
-- DIRECT_SQL: 명확한 지역+연도+지표 (예: "2023년 서울 인구", "경기도 사업체 수")
-- SEMANTIC_SEARCH: 모호한 표현, 비교 필요 (예: "가장 높은", "비교")
-- MULTI_STEP: 복합 분석, 계산 필요 (예: "비율", "증가율")
-- REFUSE: 데이터 범위 외
-
-## 출력 형식 (간결하게)
-전략: [DIRECT_SQL/SEMANTIC_SEARCH/MULTI_STEP/REFUSE]
-복잡도: [SIMPLE/COMPLEX/ANALYTICAL]
-필요 데이터: [테이블명]
-주의사항: [있을 경우만]
+### 주요 지역 코드:
+- 서울특별시: '11'
+- 경기도: '41' 
+- 부산광역시: '47'
+- 부산 해운대구: '47111'
+- 부산 수영구: '47113'
+- 서울 강남구: '11680'
+- 서울 종로구: '11110'
 """
 
-# 2. 고도화된 SQL 생성 프롬프트
-SQL_GENERATION_PROMPT = f"""
-통계 분석 전문가로서 정확하고 효율적인 SQL 쿼리를 생성하세요.
+# ========================================
+# SGIS API 통계 정보 (info_api 규칙 기반)
+# ========================================
 
-## 입력 정보
-질문: {{question}}
-분석 결과: {{analysis_result}}
-검색 컨텍스트: {{context}}
-복잡도: {{complexity}}
+SGIS_API_INFO = """
+### SGIS API 주요 통계 조회 가능 항목
 
-## 데이터베이스 스키마
-{DATABASE_SCHEMA_INFO}
+**총조사 주요지표 조회 API**
+- 총인구(tot_ppltn), 평균나이(avg_age), 인구밀도(ppltn_dnsty)
+- 노령화지수(aged_child_idx), 노년부양비(oldage_suprt_per), 유년부양비(juv_suprt_per)
+- 총가구(tot_family), 평균가구원수(avg_fmember_cnt), 총주택(tot_house)
+- 농가/임가/어가 관련: nongga_cnt, imga_cnt, naesuoga_cnt, haesuoga_cnt
+- 사업체: employee_cnt(종업원수), corp_cnt(사업체수)
 
-## 고급 쿼리 생성 규칙
+**인구통계 API (searchpopulation)**
+- 행정구역별 인구수(population) 조회
 
-### 1. 기본 원칙
-- PostgreSQL 문법 준수
-- 성능 최적화된 쿼리
-- 명확한 WHERE 조건
-- 적절한 정렬 및 제한
+**가구통계 API (household)**
+- 가구수(household_cnt), 총 가구원수(family_member_cnt), 평균가구원수(avg_family_member_cnt)
 
-### 2. 복잡도별 처리
-- SIMPLE: 단순 SELECT
-- COMPLEX: JOIN, UNION 활용
-- ANALYTICAL: 윈도우 함수, 집계 함수
+**주택통계 API (house)**
+- 주택수(house_cnt) 조회
 
-### 3. 데이터 품질 보장
-- NULL 값 처리
-- 중복 제거 (DISTINCT)
-- 유효한 범위 필터링
-- 결과 검증 가능한 형태
+**사업체통계 API (company)**
+- 사업체수(corp_cnt), 종사자수(tot_worker) 조회
 
-## 출력 형식
+**농가/임가/어가통계 API**
+- 농가수(farm_cnt), 임가수(forestry_cnt), 어가수(fishery_cnt)
+- 각각의 인구수 및 평균인구수 제공
+
+**가구원통계 API (householdmember)**
+- 농가/임가/어가별 가구원 통계
+- 성별, 연령대별 세분화 가능
+
+**연도별 데이터 범위:**
+- 인구/주택: 2015년~2023년
+- 사업체: 2000년~2023년
+- 농림어업: 2000년, 2005년, 2010년, 2015년, 2020년
+"""
+
+# ========================================
+# SQL 생성 프롬프트 템플릿
+# ========================================
+
+SQL_GENERATION_PROMPT = """
+당신은 한국의 통계청 데이터를 분석하는 PostgreSQL 전문가입니다.
+
+질문: {question}
+
+## 사용 가능한 데이터베이스 스키마 (실제 DB 기반)
+{schema_info}
+
+## 지역 코드 정보
+{region_info}
+
+## **중요 컬럼 매핑** - 반드시 정확히 사용할 것!
+
+### 사업체수 조회시 주의사항:
+1. **company_stats**: company_cnt (사업체수) 
+2. **population_stats**: corp_cnt (사업체수) 
+3. **household_stats**: avg_household_size (평균가구원수) 
+
+### 예시 쿼리 패턴:
+- 사업체수 조회시 company_stats 테이블의 **company_cnt** 컬럼 사용
+- 부산 해운대구: adm_cd = '47111', 수영구: adm_cd = '47113'  
+- 2023년 최신 데이터: WHERE year = 2023
+- 다중지역: WHERE adm_cd IN ('47111', '47113')
+- 순위 정렬: ORDER BY 컬럼명 DESC
+
+### SQL 작성 예시:
 ```sql
--- 쿼리 목적: [설명]
--- 예상 결과: [건수와 형태]
-[SQL 쿼리]
+-- 부산 구별 사업체수 조회
+SELECT adm_nm, company_cnt 
+FROM company_stats 
+WHERE adm_cd IN ('47111', '47113') AND year = 2023
+ORDER BY company_cnt DESC;
+
+-- 서울시 총 인구수 조회
+SELECT adm_nm, tot_ppltn
+FROM population_stats 
+WHERE adm_cd = '11' AND year = 2023;
+
+-- 전국 평균가구원수 상위 지역 조회
+SELECT adm_nm, avg_household_size
+FROM household_stats 
+WHERE year = 2023 AND avg_household_size IS NOT NULL
+ORDER BY avg_household_size DESC
+LIMIT 10;
 ```
 
-검증 체크리스트:
-- [ ] 문법 정확성
-- [ ] 논리적 타당성  
-- [ ] 성능 효율성
-- [ ] 결과 해석 가능성
+## 최종 답변
+```sql
+[사용자 질문에 맞는 PostgreSQL 쿼리 작성]
+```
+
+SQL:
 """
 
-# 3. 간결한 답변 생성 프롬프트
-ANSWER_GENERATION_PROMPT = """
-사용자 질문에 대해 간결하고 명확하게 답변하세요.
+# ========================================
+# ReAct Agent 프롬프트
+# ========================================
 
-## 입력 정보
-질문: {question}
-SQL 쿼리: {sql_query}
-실행 결과: {sql_results}
+REACT_AGENT_INITIAL_PROMPT = """
+당신은 한국 통계청 데이터를 분석하는 전문 SQL 에이전트입니다.
 
-## 답변 형식 (간결하게)
+=== 사용자 질문 ===
+{question}
 
-**{question}**
+=== 데이터베이스 스키마 ===
+{schema_info}
 
-{sql_results}
+=== 지시사항 ===
+사용자의 질문을 분석한 후 적절한 SQL 쿼리를 생성하여 execute_sql_query 도구를 사용해 실행하세요.
 
-위 데이터를 기반으로 답변:
-[질문에 대한 직접적이고 명확한 답변]
+주의사항:
+1. 지역 코드를 정확히 매핑하여 사용 (예: 서울 '11', 부산 '47')
+2. 최신 연도 데이터를 우선 사용 (2023년)
+3. SELECT 문만 사용하세요
+4. 결과는 적절히 제한하여 반환 (LIMIT 10 등)
 
-## 답변 원칙
-1. 실제 데이터만 사용
-2. 간결하고 명확하게
-3. 핵심 내용만 포함
-4. 불필요한 설명 제거
+반드시 execute_sql_query 도구를 사용해 쿼리를 실행하세요.
 """
 
-# 4. 거부 프롬프트
-REFUSAL_PROMPT = """
-다음 질문에 대해 데이터가 없어 답변할 수 없습니다.
-
-질문: {question}
-시도한 검색: {attempted_searches}
-
-정중하고 도움이 되는 거부 메시지를 생성하세요.
-대안 제안을 포함하세요.
-"""
-
-# 기존 호환성을 위한 시스템 프롬프트 (간소화)
-SYSTEM_PROMPT = f"""
-당신은 한국 센서스 통계 데이터 전문 AI입니다.
-
-## 핵심 원칙
-1. 실제 데이터만 사용
-2. 추측 금지  
-3. 모르면 솔직히 거부
-
-## 데이터베이스
-{DATABASE_SCHEMA_INFO}
-
-반드시 도구를 사용해 실제 데이터를 조회한 후 답변하세요.
-"""
-
-# ===== 단계별 전문 프롬프트들 =====
-
-# 1단계: 질문 분석 프롬프트
-ANALYZE_QUESTION_PROMPT = f"""
-당신은 사용자 질문을 분석하는 전문가입니다.
-
-## 작업 목표
-사용자의 질문을 정확히 이해하고 요구사항을 명확히 정의하세요.
-
-## 데이터베이스 정보
-{DATABASE_SCHEMA_INFO}
-
-## 분석 결과 형식
-다음 형식으로 정확히 분석하세요:
-
-**요구사항**: 사용자가 원하는 정보를 명확히 정의
-**관련 테이블**: 필요한 테이블 목록
-**핵심 지표**: 조회해야 할 주요 컬럼들
-**필터 조건**: 필요한 WHERE 조건들
-**복잡도**: 단순/중간/복잡 중 하나
-
-사용자 질문: {{question}}
-"""
-
-# 2단계: 분석 전략 수립 프롬프트
-PLAN_APPROACH_PROMPT = """
-당신은 데이터 분석 전략을 수립하는 전문가입니다.
-
-## 작업 목표
-요구사항을 바탕으로 체계적인 분석 전략을 수립하세요.
-
-## 이전 분석 결과
-요구사항: {requirements}
-
-## 전략 수립 형식
-**분석 접근법**: 어떤 방식으로 분석할지 설명
-**단계별 계획**: 1단계, 2단계... 순서대로 계획
-**예상 어려움**: 발생 가능한 문제점들
-**대안 계획**: 문제 발생 시 대안
-
-명확하고 실행 가능한 계획을 수립하세요.
-"""
-
-# 3단계: 쿼리 구성 프롬프트
-BUILD_QUERY_PROMPT = """
-당신은 SQL 쿼리 작성 전문가입니다.
-
-## 작업 목표
-분석 계획에 따라 최적화된 SQL 쿼리를 작성하세요.
-
-## 이전 단계 결과
-요구사항: {requirements}
-분석 계획: {analysis_plan}
-
-## 쿼리 작성 규칙
-1. PostgreSQL 문법 사용
-2. 성능 최적화 고려
-3. 가독성 있는 코드
-4. 적절한 주석 포함
-
-## 출력 형식
-**메인 쿼리**: 주요 분석용 쿼리
-**검증 쿼리**: 결과 검증용 보조 쿼리 (필요시)
-**쿼리 설명**: 각 쿼리의 목적과 로직 설명
-
-반드시 실행 가능한 SQL 쿼리를 작성하세요.
-"""
-
-# 4단계: 결과 검증 프롬프트
-VALIDATE_RESULTS_PROMPT = """
-당신은 데이터 품질 검증 전문가입니다.
-
-## 작업 목표
-SQL 실행 결과의 품질과 신뢰성을 평가하세요.
-
-## 실행 결과
-쿼리: {validated_query}
-결과: {sql_results}
-
-## 검증 항목
-1. **데이터 완정성**: 결과가 완전한가?
-2. **논리적 일관성**: 결과가 논리적으로 타당한가?
-3. **범위 적절성**: 데이터 범위가 적절한가?
-4. **이상값 검토**: 비정상적인 값이 있는가?
-
-## 품질 점수
-0-100점 스케일로 결과 품질을 평가하고 근거를 제시하세요.
-
-**품질 점수**: XX점
-**검증 결과**: 합격/불합격
-**개선 제안**: 필요시 추가 분석 제안
-"""
-
-# 5단계: 데이터 분석 프롬프트
-ANALYZE_DATA_PROMPT = """
-당신은 데이터 분석 및 인사이트 도출 전문가입니다.
-
-## 작업 목표
-검증된 데이터를 심층 분석하여 의미 있는 인사이트를 도출하세요.
-
-## 분석 데이터
-요구사항: {requirements}
-실행 결과: {sql_results}
-품질 점수: {result_quality_score}점
-
-## 분석 영역
-1. **현황 분석**: 현재 상태 파악
-2. **트렌드 분석**: 변화 패턴 파악
-3. **비교 분석**: 지역/시기별 비교
-4. **특이사항**: 주목할 만한 발견사항
-
-## 인사이트 형식
-**핵심 발견**: 가장 중요한 발견 3가지
-**시사점**: 결과가 의미하는 바
-**추가 분석 제안**: 더 깊이 있는 분석 제안
-
-데이터를 바탕으로 한 객관적이고 유의미한 분석을 제공하세요.
-"""
-
-# 6단계: 최종 응답 생성 프롬프트
-GENERATE_FINAL_RESPONSE_PROMPT = """
-당신은 분석 결과를 사용자 친화적으로 전달하는 커뮤니케이션 전문가입니다.
-
-## 작업 목표
-모든 분석 결과를 종합하여 사용자에게 명확하고 유용한 답변을 제공하세요.
-
-## 종합 정보
-원본 질문: {current_query}
-요구사항: {requirements}
-데이터 인사이트: {data_insights}
-추천사항: {recommendations}
-
-## 응답 구조
-1. **직접적 답변**: 사용자 질문에 대한 명확한 답
-2. **핵심 데이터**: 주요 수치와 통계
-3. **인사이트**: 데이터가 보여주는 의미
-4. **맥락 설명**: 결과의 배경과 의미
-5. **추가 정보**: 관련된 유용한 정보
-
-## 톤앤매너
-- 전문적이지만 이해하기 쉽게
-- 구체적인 수치 제시
-- 객관적이고 신뢰할 수 있게
-
-사용자가 만족할 수 있는 완성도 높은 답변을 작성하세요.
-"""
-
-# 사용자 프롬프트 템플릿
-HUMAN_PROMPT = """
+REACT_AGENT_RESPONSE_PROMPT = """
 사용자 질문: {question}
+SQL 실행 결과: {sql_result}
 
-위 질문에 대해 단계별로 분석하고 적절한 SQL 쿼리를 생성해 사용자 질문에 정확한 답변을 제공해주세요.
+위 SQL 실행 결과를 바탕으로 사용자의 질문에 대한 명확하고 도움이 되는 답변을 작성해주세요.
+
+포함사항:
+1. 질문에 대한 직접적인 답변 제공
+2. 중요한 수치나 통계 정보 강조
+3. 필요시 추가적인 인사이트나 해석 제공
+4. 데이터 출처 및 기준 연도 명시
+
+최종 답변:
 """
+
+# ========================================
+# 통합 Agent 프롬프트
+# ========================================
+
+REQUEST_CLASSIFICATION_PROMPT = """
+다음은 사용자 입력을 분류하는 프롬프트입니다.
+
+사용자 입력: {user_input}
+
+다음 중 하나로 분류하세요:
+1. "sql_query": 인구, 가구, 사업체 등의 통계 데이터 조회 질문 (인구, 사업체, 가구 등)
+2. "general": 일반적인 대화, 인사, 도움말 등의 질문
+3. "greeting": 인사말
+4. "help": 도움말 요청
+
+응답 형식:
+request_type: [분류결과]
+confidence: [0.0-1.0 신뢰도]
+reason: [분류 이유]
+"""
+
+GENERAL_CONVERSATION_PROMPT = """
+당신은 한국 통계청 데이터를 분석하는 전문 AI 어시스턴트입니다.
+
+사용자: {user_input}
+
+다음 원칙을 지켜주세요:
+1. 친근하고 도움이 되도록 응답
+2. 통계 데이터에 대한 질문이면 구체적인 예시 제공
+3. 간결하고 명확한 답변
+
+답변:
+"""
+
+RESPONSE_SYNTHESIS_PROMPT = """
+사용자의 질문에 대한 SQL 실행 결과를 자연스럽게 설명해주세요.
+
+사용자 질문: {user_input}
+SQL 실행 결과: {sql_result}
+
+다음 원칙을 지켜주세요:
+1. 결과를 이해하기 쉽게 설명하기
+2. 사용자의 의도에 맞는 답변 제공
+3. 중요한 수치 정보나 트렌드 강조
+4. 필요시 추가적인 인사이트나 해석 제공
+
+최종 답변:
+"""
+
+# ========================================
+# 미리 정의된 응답 템플릿
+# ========================================
+
+GREETING_RESPONSE = """
+안녕하세요! 한국 통계청 데이터를 분석하는 전문 AI 어시스턴트입니다. 인구, 가구, 사업체 등의 통계 정보를 궁금한 점을 물어보세요.
+"""
+
+HELP_RESPONSE = """
+**제가 도움드릴 수 있는 질문들:**
+
+**인구 통계:**
+- 2023년 서울시의 인구는?
+- 경기도에서 인구가 가장 많은 시군구는?
+
+**사업체 통계:**
+- 부산시 구별 사업체수는 얼마나 될까
+- 2023년 전국에서 사업체가 가장 많은 지역은?
+
+**가구/주택 통계:**
+- 경기도의 평균 가구원수는 얼마인가요?
+- 서울시의 1인 가구 비율은 어떻게 될까
+
+무엇을 도와드릴까요?
+"""
+
+# ========================================
+# 쿼리 생성 서비스용 프롬프트
+# ========================================
+
+QUERY_GENERATION_SERVICE_PROMPT = """
+다음 텍스트와 관련된 일반적인 질문 쿼리를 5개 생성해주세요.
+각 쿼리는 한국의 통계청 일반인이 물어볼 만한 자연스러운 질문이어야 합니다.
+
+텍스트:
+{text}
+
+다음 형식의 JSON으로 반환하세요:
+{{
+    "queries": [
+        {{"query": "질문 1", "reason": "생성 이유"}},
+        {{"query": "질문 2", "reason": "생성 이유"}},
+        {{"query": "질문 3", "reason": "생성 이유"}},
+        {{"query": "질문 4", "reason": "생성 이유"}},
+        {{"query": "질문 5", "reason": "생성 이유"}}
+    ]
+}}
+"""
+
+# ========================================
+# 오류 처리 메시지 템플릿
+# ========================================
+
+ERROR_HANDLING_PROMPTS = {
+    "sql_syntax_error": "SQL 문법 오류가 발생했습니다. 쿼리를 다시 확인해 주세요.",
+    "table_not_found": "테이블을 찾을 수 없습니다. 스키마 정보를 확인해주세요.",
+    "column_not_found": "컬럼을 찾을 수 없습니다. 컬럼명을 확인해주세요.",
+    "no_data": "조회된 데이터가 없습니다. 다른 조건으로 검색해보세요.",
+    "connection_error": "데이터베이스 연결 오류가 발생했습니다.",
+}
+
+# ========================================
+# 프롬프트 유틸리티 함수들
+# ========================================
+
+def get_sql_generation_prompt(question: str, region_info: str = "", schema_info: str = None) -> str:
+    """SQL 생성용 프롬프트 반환"""
+    return SQL_GENERATION_PROMPT.format(
+        question=question,
+        region_info=region_info or "지역 정보가 명시되지 않음 - 전국 또는 특정 지역 코드를 사용해 검색",
+        schema_info=schema_info or DATABASE_SCHEMA_INFO
+    )
+
+def get_react_agent_initial_prompt(question: str, schema_info: str = None) -> str:
+    """ReAct Agent 초기 프롬프트 반환"""
+    return REACT_AGENT_INITIAL_PROMPT.format(
+        question=question,
+        schema_info=schema_info or DATABASE_SCHEMA_INFO
+    )
+
+def get_react_agent_response_prompt(question: str, sql_result: str) -> str:
+    """ReAct Agent 응답 생성 프롬프트 반환"""
+    return REACT_AGENT_RESPONSE_PROMPT.format(
+        question=question,
+        sql_result=sql_result
+    )
+
+def get_request_classification_prompt(user_input: str) -> str:
+    """요청 분류 프롬프트 반환"""
+    return REQUEST_CLASSIFICATION_PROMPT.format(user_input=user_input)
+
+def get_general_conversation_prompt(user_input: str) -> str:
+    """일반 대화 프롬프트 반환"""
+    return GENERAL_CONVERSATION_PROMPT.format(user_input=user_input)
+
+def get_response_synthesis_prompt(user_input: str, sql_result: str) -> str:
+    """응답 합성용 프롬프트 반환"""
+    return RESPONSE_SYNTHESIS_PROMPT.format(
+        user_input=user_input,
+        sql_result=sql_result
+    )
+
+def get_query_generation_service_prompt(text: str) -> str:
+    """쿼리 생성 서비스용 프롬프트 반환"""
+    return QUERY_GENERATION_SERVICE_PROMPT.format(text=text)
+
+def get_database_schema() -> str:
+    """데이터베이스 스키마 정보 반환"""
+    return DATABASE_SCHEMA_INFO
+
+def get_region_code_mapping() -> str:
+    """행정구역 코드 매핑 정보 반환"""
+    return REGION_CODE_MAPPING
+
+def get_sgis_api_info() -> str:
+    """SGIS API 정보 반환"""
+    return SGIS_API_INFO
+
+def get_error_message(error_type: str) -> str:
+    """오류 타입별 메시지 반환"""
+    return ERROR_HANDLING_PROMPTS.get(error_type, "알 수 없는 오류가 발생했습니다.")
+
+# ========================================
+# 시스템 프롬프트 통합 관리 함수
+# ========================================
+
+def get_system_prompt(prompt_type: str = "default", **kwargs) -> str:
+    """
+    시스템 프롬프트 통합 반환
+    
+    Args:
+        prompt_type: 프롬프트 타입 ('sql_generation', 'react_initial', 'classification' 등)
+        **kwargs: 프롬프트 템플릿에 필요한 변수들
+    
+    Returns:
+        str: 완성된 시스템 프롬프트
+    """
+    prompt_map = {
+        "sql_generation": get_sql_generation_prompt,
+        "react_initial": get_react_agent_initial_prompt,
+        "react_response": get_react_agent_response_prompt,
+        "classification": get_request_classification_prompt,
+        "general": get_general_conversation_prompt,
+        "synthesis": get_response_synthesis_prompt,
+        "query_service": get_query_generation_service_prompt,
+    }
+    
+    if prompt_type in prompt_map:
+        return prompt_map[prompt_type](**kwargs)
+    else:
+        return DATABASE_SCHEMA_INFO  # 기본값

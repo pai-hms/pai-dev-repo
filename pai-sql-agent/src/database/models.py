@@ -1,14 +1,14 @@
 """
 데이터베이스 모델 정의
-데이터와 로직의 일체화 원칙에 따라 데이터 구조와 관련 로직을 함께 정의
+통계청 및 SGIS API 데이터를 저장하기 위한 SQLAlchemy 모델들
 """
 from datetime import datetime
 from typing import Optional, Dict, Any
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, Text, BigInteger, 
-    Boolean, JSON, ForeignKey, Index, UniqueConstraint
+    Boolean, JSON, ForeignKey, Index, UniqueConstraint, TIMESTAMP
 )
-# pgvector는 SQL에서 직접 관리하고, Python에서는 TEXT로 처리
+# pgvector는 SQL에서만 사용, Python에서는 TEXT로 처리
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -43,12 +43,12 @@ class PopulationStats(Base, TimestampMixin):
     male_ppltn = Column(BigInteger, nullable=True, comment="남자인구")
     female_ppltn = Column(BigInteger, nullable=True, comment="여자인구")
     
-    # 연령대별 인구 (추가 컬럼들)
+    # 연령별 인구 (주요 구간)
     age_0_14 = Column(BigInteger, nullable=True, comment="0-14세 인구")
     age_15_64 = Column(BigInteger, nullable=True, comment="15-64세 인구")
     age_65_over = Column(BigInteger, nullable=True, comment="65세 이상 인구")
     
-    # 총조사 주요지표 추가 필드들
+    # 가구 및 주택 관련 (총조사에서 함께 제공)
     tot_family = Column(BigInteger, nullable=True, comment="총가구")
     avg_fmember_cnt = Column(Float, nullable=True, comment="평균가구원수")
     tot_house = Column(BigInteger, nullable=True, comment="총주택")
@@ -71,7 +71,7 @@ class PopulationStats(Base, TimestampMixin):
 
 
 class PopulationSearchStats(Base, TimestampMixin):
-    """인구통계 검색 데이터 (searchpopulation.json)"""
+    """인구검색 세부 통계 (searchpopulation.json)"""
     __tablename__ = "population_search_stats"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -81,11 +81,11 @@ class PopulationSearchStats(Base, TimestampMixin):
     
     # 검색 조건
     gender = Column(Integer, nullable=True, comment="성별(0:전체, 1:남자, 2:여자)")
-    age_type = Column(String(10), nullable=True, comment="연령타입")
-    edu_level = Column(String(10), nullable=True, comment="교육정도")
+    age_type = Column(String(10), nullable=True, comment="연령구분")
+    edu_level = Column(String(10), nullable=True, comment="교육수준")
     mrg_state = Column(Integer, nullable=True, comment="혼인상태")
     
-    # 인구수
+    # 결과값
     population = Column(BigInteger, nullable=True, comment="인구수")
     
     __table_args__ = (
@@ -109,7 +109,7 @@ class HouseholdStats(Base, TimestampMixin):
     family_member_cnt = Column(BigInteger, nullable=True, comment="가구원수")
     avg_household_size = Column(Float, nullable=True, comment="평균 가구원수")
     
-    # 가구 유형별
+    # 특수 가구
     one_person_household = Column(BigInteger, nullable=True, comment="1인 가구수")
     elderly_household = Column(BigInteger, nullable=True, comment="고령자 가구수")
     
@@ -158,7 +158,7 @@ class CompanyStats(Base, TimestampMixin):
 
 
 class IndustryCodeStats(Base, TimestampMixin):
-    """산업분류별 통계 데이터"""
+    """산업분류 코드 통계"""
     __tablename__ = "industry_code_stats"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -168,7 +168,7 @@ class IndustryCodeStats(Base, TimestampMixin):
     industry_cd = Column(String(10), nullable=True, comment="산업분류코드")
     industry_nm = Column(String(255), nullable=True, comment="산업분류명")
     
-    # 산업별 지표
+    # 산업별 통계
     company_cnt = Column(BigInteger, nullable=True, comment="사업체수")
     employee_cnt = Column(BigInteger, nullable=True, comment="종사자수")
     
@@ -188,7 +188,7 @@ class FarmHouseholdStats(Base, TimestampMixin):
     
     # 농가 관련 지표
     farm_cnt = Column(BigInteger, nullable=True, comment="농가수(가구)")
-    population = Column(BigInteger, nullable=True, comment="농가인구수(명)")
+    population = Column(BigInteger, nullable=True, comment="농가인구(명)")
     avg_population = Column(Float, nullable=True, comment="농가 평균 인구수(명)")
     
     __table_args__ = (
@@ -208,7 +208,7 @@ class ForestryHouseholdStats(Base, TimestampMixin):
     
     # 임가 관련 지표
     forestry_cnt = Column(BigInteger, nullable=True, comment="임가수(가구)")
-    population = Column(BigInteger, nullable=True, comment="임가인구수(명)")
+    population = Column(BigInteger, nullable=True, comment="임가인구(명)")
     avg_population = Column(Float, nullable=True, comment="임가 평균 인구수(명)")
     
     __table_args__ = (
@@ -229,7 +229,7 @@ class FisheryHouseholdStats(Base, TimestampMixin):
     
     # 어가 관련 지표
     fishery_cnt = Column(BigInteger, nullable=True, comment="어가수(가구)")
-    population = Column(BigInteger, nullable=True, comment="어가인구수(명)")
+    population = Column(BigInteger, nullable=True, comment="어가인구(명)")
     avg_population = Column(Float, nullable=True, comment="어가 평균 인구수(명)")
     
     __table_args__ = (
@@ -247,7 +247,7 @@ class HouseholdMemberStats(Base, TimestampMixin):
     adm_cd = Column(String(20), nullable=False, comment="행정구역코드")
     adm_nm = Column(String(255), nullable=True, comment="행정구역명")
     data_type = Column(Integer, nullable=False, comment="가구타입(1:농가, 2:임가, 3:해수면어가, 4:내수면어가)")
-    gender = Column(Integer, nullable=True, comment="성별(0:총합, 1:남자, 2:여자)")
+    gender = Column(Integer, nullable=True, comment="성별(0:전체, 1:남자, 2:여자)")
     age_from = Column(Integer, nullable=True, comment="나이(from)")
     age_to = Column(Integer, nullable=True, comment="나이(to)")
     
@@ -260,8 +260,8 @@ class HouseholdMemberStats(Base, TimestampMixin):
     )
 
 
-# DocumentEmbedding 테이블은 SQL 초기화 스크립트에서 직접 생성
-# SQLAlchemy 모델에서는 제외하여 pgvector 의존성 문제 해결
+# DocumentEmbedding 클래스는 SQL 벡터 독립적으로 처리
+# SQLAlchemy 모델에서 pgvector 의존성 제거
 
 class CrawlLog(Base, TimestampMixin):
     """크롤링 로그"""
@@ -269,13 +269,42 @@ class CrawlLog(Base, TimestampMixin):
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     api_endpoint = Column(String(255), nullable=False, comment="API 엔드포인트")
-    year = Column(Integer, nullable=True, comment="요청 연도")
+    year = Column(Integer, nullable=True, comment="수집 연도")
     adm_cd = Column(String(20), nullable=True, comment="행정구역코드")
-    status = Column(String(50), nullable=False, comment="크롤링 상태")
-    error_message = Column(Text, nullable=True, comment="에러 메시지")
-    response_count = Column(Integer, nullable=True, comment="응답 데이터 개수")
+    status = Column(String(50), nullable=False, comment="처리 상태")
+    error_message = Column(Text, nullable=True, comment="오류 메시지")
+    response_count = Column(Integer, nullable=True, comment="응답 레코드 수")
     
     __table_args__ = (
         Index("idx_crawl_endpoint_status", "api_endpoint", "status"),
         Index("idx_crawl_created_at", "created_at"),
+    )
+
+
+class AgentSession(Base):
+    """멀티턴 대화 세션 (SQL Agent 전용)"""
+    __tablename__ = "agent_sessions"
+    
+    session_id = Column(String, primary_key=True)
+    thread_id = Column(String, unique=True, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    user_id = Column(String, nullable=True)  # 향후 사용자 인증시 활용
+    
+    # 타임스탬프
+    created_at = Column(TIMESTAMP, default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP, default=func.now(), onupdate=func.now(), nullable=False)
+    last_activity = Column(TIMESTAMP, default=func.now(), nullable=False)
+    
+    # 세션 정보
+    message_count = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # 메타데이터 (JSON 형태로 저장)
+    settings = Column(JSON, default={}, nullable=False)
+    
+    __table_args__ = (
+        Index("idx_agent_sessions_thread_id", "thread_id"),
+        Index("idx_agent_sessions_user_id", "user_id"),
+        Index("idx_agent_sessions_activity", "last_activity"),
+        Index("idx_agent_sessions_active", "is_active"),
     )

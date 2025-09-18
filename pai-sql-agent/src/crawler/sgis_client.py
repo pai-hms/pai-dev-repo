@@ -1,6 +1,7 @@
 """
 SGIS API 클라이언트
-데이터와 로직의 일체화 원칙에 따라 SGIS API 관련 데이터와 로직을 함께 관리
+통계청 통계지리정보서비스 SGIS API 호출을 담당하는 클라이언트 모듈
+Docker Compose 환경변수와 통합 설정 지원
 """
 import asyncio
 import hashlib
@@ -50,364 +51,273 @@ class SGISResponse:
 
 
 class SGISClient:
-    def __init__(self) -> None:
-        self.settings = get_settings()
-        self.base_url = self.settings.sgis_base_url
-        self.service_id = self.settings.sgis_service_id
-        self.security_key = self.settings.sgis_security_key
+    """
+    SGIS API 클라이언트
+    Docker Compose 환경변수 기반 설정 지원
+    """
+    
+    def __init__(self, service_id: Optional[str] = None, security_key: Optional[str] = None):
+        """
+        SGIS 클라이언트 초기화
+        
+        Args:
+            service_id: SGIS 서비스 ID (None이면 환경변수에서 로드)
+            security_key: SGIS 보안 키 (None이면 환경변수에서 로드)
+        """
+        # 설정에서 SGIS 정보 가져오기 (Docker 환경변수 포함)
+        settings = get_settings()
+        
+        # 매개변수가 제공되면 사용, 아니면 환경변수에서 로드
+        self.service_id = service_id or settings.sgis_service_id
+        self.security_key = security_key or settings.sgis_security_key
+        self.base_url = settings.sgis_base_url
+        
+        # 설정 검증
+        if not self.service_id or not self.security_key:
+            raise ValueError(
+                "SGIS API 설정이 필요합니다. "
+                "환경변수 SGIS_SERVICE_ID, SGIS_SECURITY_KEY를 설정하거나 "
+                "생성자 매개변수로 전달하세요."
+            )
+        
+        # HTTP 클라이언트 초기화
+        self._client = httpx.AsyncClient(timeout=30.0)
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
+    
+    async def __aenter__(self):
+        """비동기 컨텍스트 매니저 진입"""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """비동기 컨텍스트 매니저 종료"""
+        await self.close()
+    
+    async def close(self):
+        """클라이언트 정리"""
+        if self._client:
+            await self._client.aclose()
+    
+    async def authenticate(self) -> bool:
+        """
+        SGIS API 인증 토큰 획득
+        Docker 환경변수의 service_id, security_key 사용
         
-        # SGIS API 엔드포인트 정의 (10개 모두)
-        self.endpoints = {
-            SGISDataType.POPULATION: "/stats/population.json",
-            SGISDataType.SEARCH_POPULATION: "/stats/searchpopulation.json",
-            SGISDataType.HOUSEHOLD: "/stats/household.json", 
-            SGISDataType.HOUSE: "/stats/house.json",
-            SGISDataType.COMPANY: "/stats/company.json",
-            SGISDataType.INDUSTRY_CODE: "/stats/industrycode.json",
-            SGISDataType.FARM_HOUSEHOLD: "/stats/farmhousehold.json",
-            SGISDataType.FORESTRY_HOUSEHOLD: "/stats/forestryhousehold.json",
-            SGISDataType.FISHERY_HOUSEHOLD: "/stats/fisheryhousehold.json",
-            SGISDataType.HOUSEHOLD_MEMBER: "/stats/householdmember.json"
-        }
-
-    async def _get_access_token(self) -> str:
-        """액세스 토큰 획득"""
-        if (self._access_token and 
-            self._token_expires_at and 
-            datetime.now() < self._token_expires_at):
-            return self._access_token
-        
-        auth_url = f"{self.base_url}/auth/authentication.json"
-        auth_params = {
-            "consumer_key": self.service_id,
-            "consumer_secret": self.security_key
-        }
-        
-        async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
-            response = await client.get(auth_url, params=auth_params)
+        Returns:
+            bool: 인증 성공 여부
+        """
+        try:
+            # 기존 토큰이 유효한지 확인
+            if self._access_token and self._token_expires_at:
+                if datetime.now() < self._token_expires_at:
+                    return True
+            
+            # 새 토큰 요청
+            auth_url = f"{self.base_url}/auth/authentication.json"
+            params = {
+                "consumer_key": self.service_id,
+                "consumer_secret": self.security_key
+            }
+            
+            response = await self._client.get(auth_url, params=params)
             response.raise_for_status()
             
-            auth_result = response.json()
-            if auth_result.get("errCd") != 0:
-                raise ValueError(f"인증 실패: {auth_result.get('errMsg')}")
+            data = response.json()
             
-            self._access_token = auth_result["result"]["accessToken"]
-            self._token_expires_at = datetime.now() + timedelta(hours=3, minutes=50)
+            if data.get("errCd") == "0":
+                # 인증 성공
+                result = data.get("result", {})
+                self._access_token = result.get("accessToken")
+                
+                # 토큰 만료 시간 설정 (1시간)
+                self._token_expires_at = datetime.now() + timedelta(hours=1)
+                
+                return True
+            else:
+                # 인증 실패
+                error_msg = data.get("errMsg", "Unknown authentication error")
+                raise Exception(f"SGIS 인증 실패: {error_msg}")
+                
+        except Exception as e:
+            print(f"SGIS 인증 오류: {e}")
+            return False
+    
+    async def get_population_data(
+        self, 
+        year: int, 
+        adm_cd: str, 
+        low_search: int = 1
+    ) -> Optional[Dict[str, Any]]:
+        """
+        인구 데이터 조회
+        
+        Args:
+            year: 조회 연도
+            adm_cd: 행정구역 코드
+            low_search: 하위 행정구역 포함 여부 (0: 미포함, 1: 포함)
             
-            return self._access_token
-    
-    async def _make_request(
-        self,
-        endpoint: str,
-        params: Dict[str, Union[str, int]]
-    ) -> SGISResponse:
-        """API 요청 실행"""
-        access_token = await self._get_access_token()
+        Returns:
+            Dict[str, Any]: 인구 데이터 또는 None
+        """
+        # 인증 확인
+        if not await self.authenticate():
+            return None
         
-        request_params = {
-            "accessToken": access_token,
-            **params
-        }
-        
-        url = f"{self.base_url}{endpoint}"
-        
-        for attempt in range(self.settings.max_retries):
-            try:
-                async with httpx.AsyncClient(timeout=self.settings.api_timeout) as client:
-                    response = await client.get(url, params=request_params)
-                    response.raise_for_status()
-                    
-                    result = response.json()
-                    return SGISResponse(
-                        id=result.get("id", ""),
-                        result=result.get("result", []),
-                        err_msg=result.get("errMsg", ""),
-                        err_cd=result.get("errCd", -1),
-                        tr_id=result.get("trId", "")
-                    )
-                    
-            except (httpx.RequestError, httpx.HTTPStatusError) as e:
-                if attempt == self.settings.max_retries - 1:
-                    raise ValueError(f"API 요청 실패: {str(e)}")
-                
-                await asyncio.sleep(2 ** attempt)
-        
-        raise ValueError("최대 재시도 횟수 초과")
-    
-    # 1. 인구 통계
-    async def get_population_stats(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 1
-    ) -> SGISResponse:
-        """인구 통계 조회"""
-        params = {
-            "year": year,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.POPULATION],
-            params
-        )
-    
-    # 2. 인구 검색 (새로 추가)
-    async def search_population_stats(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        gender: int = 0,
-        low_search: int = 1
-    ) -> SGISResponse:
-        """인구 통계 검색 (행정구역코드로)"""
-        params = {
-            "year": year,
-            "gender": gender,
-            "low_search": low_search
-        }
-        
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.SEARCH_POPULATION],
-            params
-        )
-    
-    # 3. 가구 통계
-    async def get_household_stats(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 1
-    ) -> SGISResponse:
-        """가구 통계 조회"""
-        params = {
-            "year": year,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.HOUSEHOLD],
-            params
-        )
-    
-    # 4. 주택 통계
-    async def get_house_stats(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 1
-    ) -> SGISResponse:
-        """주택 통계 조회"""
-        params = {
-            "year": year,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.HOUSE],
-            params
-        )
-    
-    # 5. 사업체 통계
-    async def get_company_stats(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 1
-    ) -> SGISResponse:
-        """사업체 통계 조회"""
-        params = {
-            "year": year,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.COMPANY],
-            params
-        )
-    
-    # 6. 산업 코드 (새로 추가)
-    async def get_industry_code(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 1,
-        industry_cd: Optional[str] = None
-    ) -> SGISResponse:
-        """산업 코드별 통계 조회"""
-        params = {
-            "year": year,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        if industry_cd:
-            params["industry_cd"] = industry_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.INDUSTRY_CODE],
-            params
-        )
-    
-    async def get_industry_code(self, class_deg: str = "10") -> SGISResponse:
-        """산업분류 코드 조회"""
-        params = {
-            "class_deg": class_deg
-        }
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.INDUSTRY_CODE],
-            params
-        )
-    
-    # 7. 농가 통계
-    async def get_farm_household_stats(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 0
-    ) -> SGISResponse:
-        """농가 통계 조회"""
-        params = {
-            "year": year,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.FARM_HOUSEHOLD],
-            params
-        )
-    
-    # 8. 임가 통계
-    async def get_forestry_household_stats(
-        self,
-        year: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 0
-    ) -> SGISResponse:
-        """임가 통계 조회"""
-        params = {
-            "year": year,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.FORESTRY_HOUSEHOLD],
-            params
-        )
-    
-    # 9. 어가 통계
-    async def get_fishery_household_stats(
-        self,
-        year: int,
-        oga_div: int = 0,
-        adm_cd: Optional[str] = None,
-        low_search: int = 0
-    ) -> SGISResponse:
-        """어가 통계 조회"""
-        params = {
-            "year": year,
-            "oga_div": oga_div,
-            "low_search": low_search
-        }
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.FISHERY_HOUSEHOLD],
-            params
-        )
-    
-    # 10. 가구원 통계
-    async def get_household_member_stats(
-        self,
-        year: int,
-        data_type: int,
-        adm_cd: Optional[str] = None,
-        low_search: int = 0,
-        gender: Optional[int] = None,
-        age_from: Optional[int] = None,
-        age_to: Optional[int] = None
-    ) -> SGISResponse:
-        """가구원 통계 조회"""
-        params = {
-            "year": year,
-            "data_type": data_type,
-            "low_search": low_search
-        }
-        
-        if adm_cd:
-            params["adm_cd"] = adm_cd
-        if gender is not None:
-            params["gender"] = gender
-        if age_from is not None:
-            params["age_from"] = age_from
-        if age_to is not None:
-            params["age_to"] = age_to
-        
-        return await self._make_request(
-            self.endpoints[SGISDataType.HOUSEHOLD_MEMBER],
-            params
-        )
-    
-    async def get_all_administrative_divisions(self) -> List[Dict[str, str]]:
-        """모든 행정구역 코드 조회"""
-        sido_response = await self.get_population_stats(year=2023, low_search=1)
-        
-        if not sido_response.is_success:
-            raise ValueError(f"시도 목록 조회 실패: {sido_response.error_message}")
-        
-        all_divisions = []
-        
-        for sido in sido_response.result:
-            sido_cd = sido.get("adm_cd")
-            if not sido_cd or len(sido_cd) != 2:
-                continue
+        try:
+            # API 요청
+            api_url = f"{self.base_url}/stats/population.json"
+            params = {
+                "accessToken": self._access_token,
+                "year": year,
+                "adm_cd": adm_cd,
+                "low_search": low_search
+            }
             
-            all_divisions.append({
-                "adm_cd": sido_cd,
-                "adm_nm": sido.get("adm_nm", ""),
-                "level": "sido"
-            })
+            response = await self._client.get(api_url, params=params)
+            response.raise_for_status()
             
-            try:
-                sigungu_response = await self.get_population_stats(
-                    year=2023, 
-                    adm_cd=sido_cd, 
-                    low_search=1
-                )
+            data = response.json()
+            
+            if data.get("errCd") == "0":
+                return data
+            else:
+                error_msg = data.get("errMsg", "Unknown API error")
+                print(f"SGIS API 오류: {error_msg}")
+                return None
                 
-                if sigungu_response.is_success:
-                    for sigungu in sigungu_response.result:
-                        sigungu_cd = sigungu.get("adm_cd")
-                        if sigungu_cd and len(sigungu_cd) == 5:
-                            all_divisions.append({
-                                "adm_cd": sigungu_cd,
-                                "adm_nm": sigungu.get("adm_nm", ""),
-                                "level": "sigungu"
-                            })
-                
-                await asyncio.sleep(0.1)
-                
-            except Exception as e:
-                print(f"시군구 조회 실패 (시도: {sido_cd}): {str(e)}")
-                continue
+        except Exception as e:
+            print(f"인구 데이터 조회 오류: {e}")
+            return None
+    
+    async def get_household_data(
+        self, 
+        year: int, 
+        adm_cd: str, 
+        low_search: int = 1
+    ) -> Optional[Dict[str, Any]]:
+        """
+        가구 데이터 조회
         
-        return all_divisions
+        Args:
+            year: 조회 연도
+            adm_cd: 행정구역 코드
+            low_search: 하위 행정구역 포함 여부
+            
+        Returns:
+            Dict[str, Any]: 가구 데이터 또는 None
+        """
+        if not await self.authenticate():
+            return None
+        
+        try:
+            api_url = f"{self.base_url}/stats/household.json"
+            params = {
+                "accessToken": self._access_token,
+                "year": year,
+                "adm_cd": adm_cd,
+                "low_search": low_search
+            }
+            
+            response = await self._client.get(api_url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get("errCd") == "0":
+                return data
+            else:
+                error_msg = data.get("errMsg", "Unknown API error")
+                print(f"SGIS API 오류: {error_msg}")
+                return None
+                
+        except Exception as e:
+            print(f"가구 데이터 조회 오류: {e}")
+            return None
+    
+    async def get_company_data(
+        self, 
+        year: int, 
+        adm_cd: str, 
+        low_search: int = 1
+    ) -> Optional[Dict[str, Any]]:
+        """
+        사업체 데이터 조회
+        
+        Args:
+            year: 조회 연도
+            adm_cd: 행정구역 코드
+            low_search: 하위 행정구역 포함 여부
+            
+        Returns:
+            Dict[str, Any]: 사업체 데이터 또는 None
+        """
+        if not await self.authenticate():
+            return None
+        
+        try:
+            api_url = f"{self.base_url}/stats/company.json"
+            params = {
+                "accessToken": self._access_token,
+                "year": year,
+                "adm_cd": adm_cd,
+                "low_search": low_search
+            }
+            
+            response = await self._client.get(api_url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get("errCd") == "0":
+                return data
+            else:
+                error_msg = data.get("errMsg", "Unknown API error")
+                print(f"SGIS API 오류: {error_msg}")
+                return None
+                
+        except Exception as e:
+            print(f"사업체 데이터 조회 오류: {e}")
+            return None
+
+
+# 헬퍼 함수들
+async def create_sgis_client() -> SGISClient:
+    """
+    SGIS 클라이언트 생성 (환경변수 기반)
+    Docker Compose 환경변수 자동 로드
+    
+    Returns:
+        SGISClient: 설정된 SGIS 클라이언트
+        
+    Raises:
+        ValueError: SGIS 설정이 없는 경우
+    """
+    return SGISClient()  # 환경변수에서 자동 로드
+
+
+async def test_sgis_connection() -> bool:
+    """
+    SGIS API 연결 테스트
+    
+    Returns:
+        bool: 연결 성공 여부
+    """
+    try:
+        async with create_sgis_client() as client:
+            return await client.authenticate()
+    except Exception:
+        return False
+
+
+def is_sgis_configured() -> bool:
+    """
+    SGIS API 설정 여부 확인
+    
+    Returns:
+        bool: 설정 완료 여부
+    """
+    try:
+        settings = get_settings()
+        return settings.sgis_configured
+    except Exception:
+        return False

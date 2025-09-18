@@ -1,6 +1,6 @@
 """
 데이터베이스 리포지토리
-데이터 주권 원칙에 따라 각 모델별 데이터 제어권을 담당
+통계청 및 SGIS API 데이터 저장을 위한 리포지토리 클래스들
 """
 from typing import List, Optional, Dict, Any, Type, Union
 from datetime import datetime
@@ -70,7 +70,7 @@ class BaseRepository:
         return result.rowcount > 0
     
     async def count(self) -> int:
-        """레코드 개수 조회"""
+        """레코드 수 조회"""
         result = await self.session.execute(
             select(func.count(self.model.id))
         )
@@ -84,19 +84,19 @@ class BaseRepository:
         # PostgreSQL의 ON CONFLICT를 사용한 upsert
         stmt = pg_insert(self.model).values(data_list)
         
-        # 중복 키 처리: 모든 컬럼 업데이트 (id, created_at 제외)
+        # 업데이트할 컬럼: 모든 컬럼 제외 (id, created_at 제외)
         excluded_columns = {
             col.name: stmt.excluded[col.name]
             for col in self.model.__table__.columns
             if col.name not in ['id', 'created_at']
         }
         
-        # year와 adm_cd가 있는 모델들의 경우 이를 기준으로 conflict 처리
+        # year와 adm_cd를 기본 유니크 키로 사용하되 테이블별 conflict 처리
         if hasattr(self.model, 'year') and hasattr(self.model, 'adm_cd'):
             # 어가통계는 oga_div도 포함
             if hasattr(self.model, 'oga_div'):
                 conflict_columns = ['year', 'adm_cd', 'oga_div']
-            # 가구원통계는 모든 unique constraint 필드 포함
+            # 가구원통계는 복합 unique constraint 사용
             elif hasattr(self.model, 'data_type') and hasattr(self.model, 'gender') and hasattr(self.model, 'age_from'):
                 conflict_columns = ['year', 'adm_cd', 'data_type', 'gender', 'age_from', 'age_to']
             else:
@@ -113,7 +113,7 @@ class BaseRepository:
                 set_=excluded_columns
             )
         else:
-            # 기본적으로 모든 데이터를 새로 삽입 (conflict 무시)
+            # 기타의 경우 중복이면 무시 (conflict 무시)
             stmt = stmt.on_conflict_do_nothing()
         
         await self.session.execute(stmt)
@@ -127,7 +127,7 @@ class PopulationRepository(BaseRepository):
 
 
 class PopulationSearchRepository(BaseRepository):
-    """인구통계 검색 리포지토리 (searchpopulation.json)"""
+    """인구검색 통계 리포지토리 (searchpopulation.json)"""
     
     def __init__(self, session: AsyncSession):
         super().__init__(session, PopulationSearchStats)
@@ -137,7 +137,7 @@ class PopulationSearchRepository(BaseRepository):
         year: int, 
         adm_cd: str
     ) -> Optional[PopulationStats]:
-        """연도와 행정구역코드로 조회"""
+        """연도와 행정구역으로 조회"""
         result = await self.session.execute(
             select(self.model).where(
                 self.model.year == year,
@@ -159,7 +159,7 @@ class PopulationSearchRepository(BaseRepository):
         name_pattern: str,
         year: Optional[int] = None
     ) -> List[PopulationStats]:
-        """행정구역명 패턴으로 검색"""
+        """행정구역명 패턴으로 조회"""
         query = select(self.model).where(
             self.model.adm_nm.like(f"%{name_pattern}%")
         )
@@ -290,13 +290,13 @@ class HouseRepository(BaseRepository):
 
 
 class IndustryCodeRepository(BaseRepository):
-    """산업분류 통계 리포지토리"""
+    """산업분류 코드 리포지토리"""
     
     def __init__(self, session: AsyncSession):
         super().__init__(session, IndustryCodeStats)
     
     async def upsert_batch(self, data_list: List[Dict[str, Any]]) -> None:
-        """산업분류 통계 데이터 배치 업서트"""
+        """산업분류 코드 데이터 배치 업서트"""
         if not data_list:
             return
         
@@ -376,7 +376,7 @@ class CrawlLogRepository(BaseRepository):
         year: Optional[int] = None,
         adm_cd: Optional[str] = None
     ) -> CrawlLog:
-        """에러 로그 기록"""
+        """오류 로그 기록"""
         return await self.create(
             api_endpoint=api_endpoint,
             year=year,
@@ -401,7 +401,7 @@ class CrawlLogRepository(BaseRepository):
         self, 
         limit: int = 50
     ) -> List[CrawlLog]:
-        """에러 로그만 조회"""
+        """오류 로그만 조회"""
         result = await self.session.execute(
             select(self.model)
             .where(self.model.status == "error")
@@ -429,16 +429,31 @@ class DatabaseService:
         self.crawl_log = CrawlLogRepository(session)
     
     async def execute_raw_query(self, query: str) -> List[Dict[str, Any]]:
-        """원시 SQL 쿼리 실행"""
-        result = await self.session.execute(text(query))
+        """원시 SQL 쿼리 실행 - 에이전트 도구용"""
+        import logging
+        logger = logging.getLogger(__name__)
         
-        # 결과를 딕셔너리 리스트로 변환
-        columns = result.keys()
-        rows = result.fetchall()
-        
-        return [
-            dict(zip(columns, row)) for row in rows
-        ]
+        try:
+            # SQL 쿼리 실행
+            result = await self.session.execute(text(query))
+            
+            # 결과를 딕셔너리 리스트로 변환 (generator 패턴 방지)
+            columns = list(result.keys())  # list()로 즉시 변환
+            rows = list(result.fetchall())  # list()로 즉시 변환
+            
+            # 딕셔너리 리스트 형태로 변환
+            return [
+                dict(zip(columns, row)) for row in rows
+            ]
+            
+        except Exception as e:
+            # 오류 발생 시 로깅
+            logger.error(f"❌ SQL 실행 실패: {e}")
+            logger.error(f"📝 실행된 쿼리: {query}")
+            logger.error(f"🔍 오류 타입: {type(e).__name__}")
+            
+            # 오류 발생 시 빈 리스트 반환 (raise 하지 않고 빈 리스트 반환으로 generator 패턴 방지)
+            return []
     
     async def get_table_schema(self, table_name: str) -> List[Dict[str, Any]]:
         """테이블 스키마 정보 조회"""

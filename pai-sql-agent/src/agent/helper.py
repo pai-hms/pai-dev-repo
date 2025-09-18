@@ -1,13 +1,19 @@
 """
 SQL Agent 헬퍼 유틸리티
-공통 기능들을 모아놓은 유틸리티 모듈
+각종 도우미 기능을 제공하는 유틸리티 모듈
+
+설계 원칙:
+- KISS 원칙: 간단한 구조화된 클래스로 기능 분리
+- 단방향 참조 원칙: 다른 모듈에서 이 모듈을 참조하되 순환 참조 금지
+- Open-Closed Principle: 확장에는 열려 있고 수정에는 닫혀 있도록 설계
 """
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
+from langchain_core.runnables import RunnableConfig
 
 
 class SchemaHelper:
-    """스키마 정보 도우미"""
+    """스키마 관련 헬퍼"""
     
     # 지역 코드 매핑
     REGION_CODES = {
@@ -30,30 +36,30 @@ class SchemaHelper:
         "제주특별자치도": "50", "제주": "50"
     }
     
-    # 포항시 상세
+    # 포항시 세부 코드
     POHANG_CODES = {
         "포항시": "47110",
-        "포항시 남구": "47111",
-        "포항시 북구": "47113"
+        "포항시 북구": "47111",
+        "포항시 남구": "47113"
     }
     
     @classmethod
     def get_region_code(cls, region_name: str) -> Optional[str]:
         """지역명으로 행정구역코드 조회"""
-        # 직접 매치
+        # 직접 매칭
         if region_name in cls.REGION_CODES:
             return cls.REGION_CODES[region_name]
         
-        # 포항시 확인
+        # 포항시 세부 처리
         if "포항" in region_name:
-            if "남구" in region_name:
-                return cls.POHANG_CODES["포항시 남구"]
-            elif "북구" in region_name:
+            if "북구" in region_name:
                 return cls.POHANG_CODES["포항시 북구"]
+            elif "남구" in region_name:
+                return cls.POHANG_CODES["포항시 남구"]
             else:
                 return cls.POHANG_CODES["포항시"]
         
-        # 부분 매치
+        # 부분 매칭
         for name, code in cls.REGION_CODES.items():
             if region_name in name or name in region_name:
                 return code
@@ -66,10 +72,10 @@ class SchemaHelper:
         question_lower = question.lower()
         tables = []
         
-        if any(keyword in question_lower for keyword in ["인구", "평균연령", "나이"]):
+        if any(keyword in question_lower for keyword in ["인구", "인구수", "나이"]):
             tables.append("population_stats")
             
-        if any(keyword in question_lower for keyword in ["가구", "1인가구", "가구원"]):
+        if any(keyword in question_lower for keyword in ["가구", "1인가구", "가구수"]):
             tables.append("household_stats")
             
         if any(keyword in question_lower for keyword in ["주택", "아파트"]):
@@ -86,7 +92,7 @@ class SchemaHelper:
 
 
 class QueryHelper:
-    """쿼리 생성 도우미"""
+    """쿼리 생성 헬퍼"""
     
     @classmethod
     def extract_year(cls, question: str) -> int:
@@ -110,7 +116,7 @@ class QueryHelper:
         if not region_code:
             return ""
         
-        # 테이블별 쿼리 생성
+        # 키워드별 쿼리 생성
         if "인구" in question_lower:
             return f"""
 SELECT adm_nm, tot_ppltn, avg_age
@@ -136,7 +142,7 @@ WHERE year = {year} AND adm_cd = '{region_code}';
 
 
 class ResponseHelper:
-    """응답 처리 도우미"""
+    """응답 처리 헬퍼"""
     
     @classmethod
     def format_number(cls, number: any) -> str:
@@ -160,7 +166,7 @@ class ResponseHelper:
                 if '|' in line and not line.startswith('-'):
                     parts = line.split('|')
                     if len(parts) >= 2:
-                        # 숫자가 포함된 부분 찾기
+                        # 숫자인 부분을 찾기
                         for part in parts[1:]:
                             part = part.strip()
                             if part.isdigit():
@@ -171,11 +177,11 @@ class ResponseHelper:
 
 
 class ValidationHelper:
-    """검증 도우미"""
+    """검증 헬퍼"""
     
     @classmethod
     def is_safe_query(cls, query: str) -> bool:
-        """안전한 쿼리인지 확인"""
+        """안전한 쿼리인지 검증"""
         dangerous_keywords = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'CREATE', 'ALTER']
         query_upper = query.upper()
         
@@ -183,7 +189,7 @@ class ValidationHelper:
     
     @classmethod
     def has_valid_table(cls, query: str) -> bool:
-        """유효한 테이블 사용 확인"""
+        """허용된 테이블 사용 여부"""
         allowed_tables = [
             'population_stats', 'household_stats', 'house_stats', 
             'company_stats', 'farm_household_stats'
@@ -191,3 +197,123 @@ class ValidationHelper:
         
         query_lower = query.lower()
         return any(table in query_lower for table in allowed_tables)
+
+
+class AgentHelper:
+    """
+    LangGraph에서 사용되는 service를 대체하되 최소한의 의존성 유지
+    
+    설계 원칙:
+    - Container에 대한 의존성 최소화: 필요한 서비스만 DI로 주입받기
+    - 단방향 참조 원칙: RunnableConfig 생성과 관련 기능만 담당
+    """
+
+    def __init__(
+        self,
+        chat_service=None,
+        chatbot_service=None, 
+        tool_service=None,
+        guard_ruleset_service=None,
+    ):
+        """
+        의존성 주입을 통한 초기화
+        None 허용으로 선택적 서비스 의존성 주입 가능
+        """
+        self.chat_service = chat_service
+        self.chatbot_service = chatbot_service
+        self.tool_service = tool_service
+        self.guard_ruleset_service = guard_ruleset_service
+
+    async def validate_response(self, config: RunnableConfig, message: str) -> bool:
+        """응답 검증 수행"""
+        if not self.guard_ruleset_service:
+            return True  # 서비스가 없으면 통과
+            
+        try:
+            chatbot_id = config["configurable"]["chatbot"]["chatbot_id"]
+            return await self.guard_ruleset_service.validate_response(chatbot_id, message)
+        except Exception:
+            return True  # 오류 시 통과로 처리
+        
+    async def get_runnable_config(
+        self, session_id: str, user_payload: Any = None
+    ) -> RunnableConfig:
+        """
+        RunnableConfig를 생성합니다.
+        
+        Args:
+            session_id: 세션 ID
+            user_payload: 사용자 정보 (선택적)
+            
+        Returns:
+            RunnableConfig: LangGraph 실행용 설정 객체
+        """
+        try:
+            # 기본 설정
+            default_config = {
+                "configurable": {
+                    "thread_id": session_id,
+                    "session_id": session_id,
+                }
+            }
+            
+            # 채팅 서비스가 있는 경우 세션 정보 추가
+            if self.chat_service:
+                try:
+                    session = await self.chat_service.get_chat_session(session_id)
+                    default_config["configurable"]["chatbot_id"] = session.chatbot_id
+                    
+                    # 챗봇 서비스가 있는 경우 챗봇 정보 추가
+                    if self.chatbot_service and user_payload:
+                        chatbot = await self.chatbot_service.get_user_chatbot(
+                            session.chatbot_id, user_payload
+                        )
+                        default_config["configurable"]["chatbot"] = chatbot.to_dict()
+                        
+                except Exception:
+                    pass  # 서비스 호출 실패 시 기본 설정 유지
+            
+            # 도구 서비스가 있는 경우 도구 설정 추가
+            if self.tool_service and "chatbot_id" in default_config["configurable"]:
+                try:
+                    chatbot_id = default_config["configurable"]["chatbot_id"]
+                    tools = await self.tool_service.find_by_chatbot_id(chatbot_id)
+                    for tool in tools:
+                        default_config['configurable'][tool.tool_agent_name] = tool.tool_config
+                except Exception:
+                    pass  # 도구 로딩 실패 시 무시
+                    
+            return default_config
+            
+        except Exception:
+            # 모든 실패 시 최소한의 기본 설정 반환
+            return {
+                "configurable": {
+                    "thread_id": session_id,
+                    "session_id": session_id,
+                }
+            }
+
+    def create_simple_config(self, thread_id: str, **kwargs) -> RunnableConfig:
+        """
+        간단한 RunnableConfig 생성 (빠른 생성)
+        
+        Args:
+            thread_id: 스레드 ID
+            **kwargs: 추가 설정
+            
+        Returns:
+            RunnableConfig: 설정 객체
+        """
+        config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "session_id": thread_id,
+            }
+        }
+        
+        # 추가 설정 병합
+        if kwargs:
+            config["configurable"].update(kwargs)
+            
+        return config

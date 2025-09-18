@@ -8,154 +8,197 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage
 
 from webapp.models import QueryRequest, QueryResponse, StreamChunk, ToolInfo
-from src.agent.service import get_sql_agent_service
+from src.agent.service import get_unified_agent_service, get_main_agent_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
-@router.post("/query", response_model=QueryResponse)
-async def query_sql_agent(request: QueryRequest) -> QueryResponse:
-    """SQL Agent에 질문을 보내고 응답을 받습니다"""
-    start_time = time.time()
-    
+def safe_json_dumps(obj):
+    """안전한 JSON 직렬화 (직렬화할 수 없는 객체 처리)"""
     try:
-        # 세션 ID 생성 (없는 경우)
-        session_id = request.session_id or str(uuid.uuid4())
-        
-        # 새로운 SQL Agent 서비스 가져오기
-        agent_service = await get_sql_agent_service()
-        
-        # 쿼리 실행
-        result = await agent_service.query(request.question, session_id)
-        
-        # 결과 파싱
-        processing_time = time.time() - start_time
-        
-        if result.get("error_message"):
-            return QueryResponse(
-                success=False,
-                message="쿼리 처리 중 오류가 발생했습니다.",
-                error_message=result["error_message"],
-                session_id=session_id,
-                processing_time=processing_time
-            )
-        
-        # 새로운 응답 형식 처리
-        final_message = result.get("message", "")
-        sql_queries = result.get("sql_queries", [])
-        used_tools_data = result.get("used_tools", [])
-        
-        # 새로운 형식에서는 final_message가 이미 준비됨
-        results = result.get("results", [])
-        
-        # 도구 정보를 ToolInfo 모델로 변환
-        used_tools = []
-        for tool_data in used_tools_data:
-            tool_info = ToolInfo(
-                tool_name=tool_data.get("tool_name", ""),
-                tool_function=tool_data.get("tool_function", ""),
-                tool_description=tool_data.get("tool_description", ""),
-                arguments=tool_data.get("arguments", {}),
-                execution_order=tool_data.get("execution_order", 0),
-                success=tool_data.get("success", False),
-                result_preview=tool_data.get("result_preview"),
-                error_message=tool_data.get("error_message")
-            )
-            used_tools.append(tool_info)
-        
-        return QueryResponse(
-            success=result.get("success", True),
-            message=final_message or "쿼리가 성공적으로 처리되었습니다.",
-            sql_queries=sql_queries,
-            results=results,
-            used_tools=used_tools,
-            session_id=session_id,
-            processing_time=processing_time
-        )
-        
-    except Exception as e:
-        logger.error(f"SQL Agent 쿼리 처리 중 오류: {str(e)}")
-        processing_time = time.time() - start_time
-        
-        return QueryResponse(
-            success=False,
-            message="내부 서버 오류가 발생했습니다.",
-            error_message=str(e),
-            session_id=request.session_id or str(uuid.uuid4()),
-            processing_time=processing_time
-        )
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    except (TypeError, ValueError) as e:
+        logger.warning(f"JSON 직렬화 실패: {e}, 객체: {type(obj)}")
+        # 직렬화 실패시 안전한 객체로 변환
+        safe_obj = {
+            "type": getattr(obj, "type", "unknown"),
+            "content": str(getattr(obj, "content", obj)),
+            "timestamp": getattr(obj, "timestamp", None),
+            "error": "직렬화 실패"
+        }
+        return json.dumps(safe_obj, ensure_ascii=False)
 
 
-@router.post("/query/stream")
+@router.post("/query")
 async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
-    """SQL Agent에 질문을 보내고 스트리밍 응답을 받습니다"""
+    """
+    🌊 통합 스트리밍 SQL Agent (기본 엔드포인트)
+    모든 요청이 자동으로 스트리밍으로 처리됩니다
+    """
     
-    async def generate_stream():
+    async def generate_unified_stream():
         try:
-            # 세션 ID 생성 (없는 경우)
+            # 세션 ID 생성
             session_id = request.session_id or str(uuid.uuid4())
             
-            # 새로운 SQL Agent 서비스 가져오기
-            agent_service = await get_sql_agent_service()
+            # 스트리밍 모드 결정 (기본값: all)
+            stream_mode = getattr(request, 'stream_mode', 'all')
             
-            # 쿼리 실행
-            result = await agent_service.query(request.question, session_id)
+            # 통합 에이전트 서비스 가져오기
+            agent_service = await get_unified_agent_service()
             
-            if result.get("error_message"):
-                yield f"data: {json.dumps({'type': 'error', 'content': result['error_message']})}\n\n"
-                return
+            # 통합 스트리밍 실행
+            async for stream_chunk in agent_service.process_request_stream(
+                user_input=request.question, 
+                thread_id=request.thread_id, 
+                session_id=session_id,
+                stream_mode=stream_mode,
+                request_type=getattr(request, 'request_type', None)
+            ):
+                # 안전한 JSON 직렬화
+                yield f"data: {safe_json_dumps(stream_chunk)}\n\n"
             
-            # 응답 메시지를 단어별로 스트리밍
-            final_message = result.get("message", "")
-            used_tools = result.get("used_tools", [])
-            
-            # 도구 실행 정보 전송
-            for tool in used_tools:
-                tool_chunk = StreamChunk(
-                    type="tool_execution",
-                    content=tool
-                )
-                yield f"data: {tool_chunk.model_dump_json()}\n\n"
-            
-            # 메시지를 단어별로 전송
-            words = final_message.split()
-            for word in words:
-                token_chunk = StreamChunk(
-                    type="token", 
-                    content=word + " "
-                )
-                yield f"data: {token_chunk.model_dump_json()}\n\n"
-            
-            # 최종 상태 전송
-            final_chunk = StreamChunk(
-                type="final_state",
-                content={
-                    "used_tools": used_tools,
-                    "message": final_message,
-                    "session_id": session_id,
-                    "success": result.get("success", True)
-                }
-            )
-            yield f"data: {final_chunk.model_dump_json()}\n\n"
+            # 스트림 종료 신호
+            end_chunk = {
+                'type': 'done', 
+                'content': '✅ 응답 생성 완료', 
+                'session_id': session_id,
+                'mode': stream_mode
+            }
+            yield f"data: {safe_json_dumps(end_chunk)}\n\n"
             
         except Exception as e:
-            logger.error(f"스트리밍 처리 중 오류: {str(e)}")
-            error_chunk = StreamChunk(
-                type="error",
-                content=str(e)
-            )
-            yield f"data: {error_chunk.model_dump_json()}\n\n"
+            logger.error(f"통합 스트리밍 오류: {str(e)}")
+            error_chunk = {
+                'type': 'error', 
+                'content': f'❌ 오류: {str(e)}',
+                'error': str(e),
+                'session_id': request.session_id or str(uuid.uuid4())
+            }
+            yield f"data: {safe_json_dumps(error_chunk)}\n\n"
     
     return StreamingResponse(
-        generate_stream(),
-        media_type="text/plain",
+        generate_unified_stream(),
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Content-Type": "text/event-stream"
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
         }
     )
 
 
-# 통합 에이전트 제거 - 단일 에이전트만 사용
+@router.post("/query/stream")
+async def query_stream_alias(request: QueryRequest) -> StreamingResponse:
+    """
+    하위 호환성을 위한 별칭 - 동일한 통합 스트리밍 사용
+    """
+    return await query_sql_agent_stream(request)
+
+
+@router.post("/query/realtime-stream")
+async def query_realtime_stream_alias(request: QueryRequest) -> StreamingResponse:
+    """
+    하위 호환성을 위한 별칭 - 동일한 통합 스트리밍 사용
+    """
+    return await query_sql_agent_stream(request)
+
+
+@router.post("/query/advanced-stream")
+async def query_advanced_stream_alias(request: QueryRequest) -> StreamingResponse:
+    """
+    하위 호환성을 위한 별칭 - 동일한 통합 스트리밍 사용
+    """
+    return await query_sql_agent_stream(request)
+
+
+# ===== 유틸리티 엔드포인트 =====
+
+@router.get("/status")
+async def get_agent_status():
+    """에이전트 상태 확인"""
+    try:
+        agent_service = await get_unified_agent_service()
+        return {
+            "success": True,
+            "status": "active",
+            "message": "Agent 서비스가 정상 작동 중입니다",
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "status": "error",
+            "message": f"Agent 서비스 오류: {str(e)}",
+            "timestamp": time.time()
+        }
+
+
+# ===== 멀티턴 대화 지원 엔드포인트 =====
+
+@router.get("/conversation/{thread_id}/history")
+async def get_conversation_history(thread_id: str, limit: int = 10):
+    """
+    대화 기록 조회 (멀티턴 대화용)
+    
+    Args:
+        thread_id: 대화 스레드 ID
+        limit: 조회할 기록 수 (기본 10개)
+    """
+    try:
+        # 메인 에이전트를 통해 SQL 에이전트 서비스 가져오기
+        main_agent_service = await get_main_agent_service()
+        sql_agent_service = main_agent_service.get_sql_agent_service()
+        result = await sql_agent_service.get_conversation_history(thread_id, limit)
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "대화 기록 조회 완료"),
+            "thread_id": thread_id,
+            "history": result.get("history", []),
+            "count": result.get("count", 0)
+        }
+        
+    except Exception as e:
+        logger.error(f"대화 기록 조회 중 오류: {str(e)}")
+        return {
+            "success": False,
+            "message": "대화 기록 조회 중 오류가 발생했습니다",
+            "error_message": str(e),
+            "thread_id": thread_id,
+            "history": [],
+            "count": 0
+        }
+
+
+@router.delete("/conversation/{thread_id}")
+async def delete_conversation(thread_id: str):
+    """
+    대화 기록 삭제 (멀티턴 대화용)
+    
+    Args:
+        thread_id: 삭제할 대화 스레드 ID
+    """
+    try:
+        # 메인 에이전트를 통해 SQL 에이전트 서비스 가져오기
+        main_agent_service = await get_main_agent_service()
+        sql_agent_service = main_agent_service.get_sql_agent_service()
+        result = await sql_agent_service.delete_conversation(thread_id)
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "대화 기록 삭제 완료"),
+            "thread_id": thread_id
+        }
+        
+    except Exception as e:
+        logger.error(f"대화 기록 삭제 중 오류: {str(e)}")
+        return {
+            "success": False,
+            "message": "대화 기록 삭제 중 오류가 발생했습니다",
+            "error_message": str(e),
+            "thread_id": thread_id
+        }
