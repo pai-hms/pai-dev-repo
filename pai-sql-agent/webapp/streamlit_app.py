@@ -302,6 +302,17 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                         st.error(f"오류: {chunk.get('content', 'Unknown error')}")
                         error_occurred = True
                         break
+                    
+                    elif chunk_type == "progress":
+                        # 🎯 진행상황 표시 (새로 추가)
+                        progress_content = chunk.get("content", "")
+                        status_container.info(progress_content)
+                        
+                        # 진행상황 통계 업데이트
+                        if "SQLAgentNode" in progress_content:
+                            streaming_stats["nodes_executed"] += 1
+                        elif "도구 호출됨" in progress_content:
+                            streaming_stats["tools_executed"] += 1
             
             # 응답 시간 계산
             if streaming_stats["start_time"] and streaming_stats["end_time"]:
