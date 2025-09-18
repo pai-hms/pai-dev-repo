@@ -25,6 +25,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=1.0.0",
     "psycopg>=3.1.0",
     "psycopg-pool>=3.1.0",
+    "dependency-injector>=4.41.0",
 ]
 
 [project.optional-dependencies]

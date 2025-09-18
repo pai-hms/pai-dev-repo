@@ -1,156 +1,118 @@
 """
-LangGraph 표준 패턴 SQL Agent 그래프
-Agent → Tools → Agent → Finalize 워크플로우
+SQL Agent 전용 LangGraph - 응답 생성 개선
 """
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode
 from psycopg_pool import AsyncConnectionPool
 
-from .nodes import LangAgentNode, LangGraphAgentState
+from .nodes import SQLAgentState, SQLPromptNode, SQLAgentNode, SQLSummaryNode, SQLResponseNode
 from .settings import AgentSettings, get_agent_settings
 from .tools import AVAILABLE_TOOLS
 
 logger = logging.getLogger(__name__)
 
 
-# 전역 체크포인터 인스턴스 (연결 유지용)
-_global_checkpointer: Optional[AsyncPostgresSaver] = None
-
-
 def create_checkpointer(settings: AgentSettings) -> Optional[AsyncPostgresSaver]:
-    """
-    PostgreSQL checkpointer 생성 (LangGraph 표준)
-    
-    Args:
-        settings: Agent 설정 (pydantic_settings 기반)
-        
-    Returns:
-        AsyncPostgresSaver 또는 None (설정 실패시)
-    """
+    """PostgreSQL checkpointer 생성"""
     if not settings.enable_checkpointer:
-        logger.info("체크포인터가 비활성화되어 있습니다")
         return None
     
     try:
-        # DATABASE_URL에서 postgresql:// 형식 확인 및 변환
         db_url = settings.DATABASE_URL
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://")
-        elif not db_url.startswith("postgresql://"):
-            db_url = f"postgresql://{db_url}"
-            
-        # AsyncConnectionPool 생성 (LangGraph 표준 방식)
-        pool = AsyncConnectionPool(
-            db_url,
-            min_size=1,
-            max_size=10,
-        )
         
-        # AsyncPostgresSaver 생성
-        checkpointer = AsyncPostgresSaver(pool)
-        logger.info("✅ PostgreSQL checkpointer 생성 완료")
-        
-        return checkpointer
-        
+        pool = AsyncConnectionPool(db_url, min_size=1, max_size=10)
+        return AsyncPostgresSaver(pool)
     except Exception as e:
-        logger.error(f"❌ Checkpointer 생성 실패: {e}")
-        logger.warning("🔄 체크포인터 비활성화 - 멀티턴 대화 기능 사용 불가")
+        logger.error(f"Checkpointer 생성 실패: {e}")
         return None
 
 
-async def cleanup_checkpointer():
-    """
-    체크포인터 정리 (애플리케이션 종료시 호출)
-    ConnectionPool을 사용하므로 별도 정리 불필요
-    """
-    logger.info("🧹 체크포인터 정리 완료 (ConnectionPool 자동 관리)")
-
-
-def get_checkpointer() -> Optional[AsyncPostgresSaver]:
-    """현재 활성 체크포인터 반환 (없으면 None)"""
-    return _global_checkpointer
-
-
-def create_lang_agent(
-    settings: AgentSettings,
-    execution_service: Any,
-    token_usage_service: Any,
-    prompt_generator: Any,
-    tools: Optional[List[Any]] = None,
-    **tool_kwargs
-) -> CompiledStateGraph:
-    """
-    LangGraph Agent 생성 (표준 패턴)
+def create_sql_agent_workflow() -> StateGraph:
+    """SQL Agent 워크플로우 생성"""
     
-    Args:
-        settings: Agent 설정
-        execution_service: 모델 실행 서비스
-        token_usage_service: 토큰 사용량 서비스
-        prompt_generator: 프롬프트 생성기
-        tools: 사용할 도구 목록 (선택사항)
-        **tool_kwargs: 개별 도구 설정
+    # 노드들 생성
+    prompt_node = SQLPromptNode()
+    summary_node = SQLSummaryNode()
+    response_node = SQLResponseNode()  # 새로 추가
+    tool_node = ToolNode(AVAILABLE_TOOLS)
     
-    Returns:
-        CompiledStateGraph: 컴파일된 LangGraph
-    """
+    # 에이전트 노드
+    async def agent_node(state: SQLAgentState):
+        from .container import get_container
+        container = await get_container()
+        llm_service = await container.llm_service()
+        
+        sql_agent = SQLAgentNode(llm_service, AVAILABLE_TOOLS)
+        return await sql_agent(state)
     
-    # 도구 설정 (기본값 또는 전달받은 도구 사용)
-    if tools is None:
-        tools = AVAILABLE_TOOLS
+    # 개선된 라우팅 로직
+    def should_continue_after_tools(state: SQLAgentState) -> Literal["agent", "summary"]:
+        """도구 실행 후 다음 단계 결정"""
+        messages = state.get("messages", [])
+        
+        # 마지막 도구 메시지 확인
+        for message in reversed(messages):
+            if hasattr(message, 'type') and message.type == "tool":
+                # 오류가 있으면 재시도
+                if message.content.startswith("Error"):
+                    logger.info("도구 실행 오류 감지 - Agent로 재시도")
+                    return "agent"
+                # 성공하면 요약으로
+                else:
+                    logger.info("도구 실행 성공 - Summary로 이동")
+                    return "summary"
+                break
+        
+        # 기본적으로 요약으로
+        return "summary"
     
-    # 노드 생성
-    agent_node = LangAgentNode(
-        execution_service=execution_service,
-        tools={tool.name: tool for tool in tools} if tools else {},
-        prompt_generator=prompt_generator,
-        token_usage_service=token_usage_service,
-    )
+    def should_continue_after_summary(state: SQLAgentState) -> Literal["response", "__end__"]:
+        """요약 후 응답 생성 여부 결정"""
+        # SQL과 데이터가 있으면 응답 생성
+        if state.get("sql_query") or state.get("data"):
+            logger.info("데이터 존재 - Response 생성")
+            return "response"
+        else:
+            logger.info("데이터 없음 - 종료")
+            return "__end__"
     
-    tool_node = ToolNode(tools) if tools else None
+    # 워크플로우 구성
+    workflow = StateGraph(SQLAgentState)
     
-    # 그래프 생성 (LangGraph 표준 패턴)
-    workflow = StateGraph(LangGraphAgentState)
-    
-    # 노드 추가
+    workflow.add_node("prompt", prompt_node)
     workflow.add_node("agent", agent_node)
-    if tool_node:
-        workflow.add_node("tools", tool_node)
+    workflow.add_node("tools", tool_node)
+    workflow.add_node("summary", summary_node)
+    workflow.add_node("response", response_node)  # 응답 생성 노드 추가
     
-    # 엣지 설정
-    workflow.set_entry_point("agent")
+    # 엣지 구성 - 개선된 플로우
+    workflow.add_edge(START, "prompt")
+    workflow.add_edge("prompt", "agent")
+    workflow.add_edge("agent", "tools")
+    workflow.add_conditional_edges("tools", should_continue_after_tools)
+    workflow.add_conditional_edges("summary", should_continue_after_summary)
+    workflow.add_edge("response", END)
     
-    if tool_node:
-        # 표준 도구 조건부 라우팅
-        workflow.add_conditional_edges("agent", tools_condition)
-        workflow.add_edge("tools", "agent")
-    
-    # 체크포인터 설정
-    checkpointer = create_checkpointer(settings)
-    
-    # 컴파일
-    compiled_graph = workflow.compile(checkpointer=checkpointer)
-    
-    logger.info("✅ LangGraph Agent 생성 완료")
-    logger.info(f"🔄 워크플로우: Agent → {'Tools → Agent' if tool_node else 'END'}")
-    
-    return compiled_graph
+    return workflow
 
 
 async def create_sql_agent_graph() -> CompiledStateGraph:
-    """
-    하위 호환성을 위한 SQL Agent 그래프 생성 함수
-    """
-    settings = await get_agent_settings()
-    
-    # 기본 설정으로 에이전트 생성 (실제 서비스들은 None으로 설정)
-    return create_lang_agent(
-        settings=settings,
-        execution_service=None,  # 실제 구현에서는 DI Container에서 주입
-        token_usage_service=None,  # 실제 구현에서는 DI Container에서 주입
-        prompt_generator=None,  # 실제 구현에서는 DI Container에서 주입
-        tools=AVAILABLE_TOOLS
-    )
+    """SQL Agent 그래프 생성"""
+    try:
+        settings = await get_agent_settings()
+        workflow = create_sql_agent_workflow()
+        checkpointer = create_checkpointer(settings)
+        
+        compiled_graph = workflow.compile(checkpointer=checkpointer)
+        logger.info("SQL Agent 그래프 생성 완료")
+        
+        return compiled_graph
+    except Exception as e:
+        logger.error(f"SQL Agent 그래프 생성 실패: {e}")
+        raise

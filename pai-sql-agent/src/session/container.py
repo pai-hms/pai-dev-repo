@@ -84,7 +84,7 @@ class SessionContainer:
             self._services[name] = instance
             return instance
 
-        raise KeyError(f"서비스 '{name}'을 찾을 수 없습니다")
+        raise KeyError(f"서비스 '{name}'을 찾을 수 없습니다.")
 
     def register_singleton(self, name: str, instance):
         """싱글톤 서비스 등록"""
@@ -92,18 +92,12 @@ class SessionContainer:
 
 
 # 헬퍼 함수들 (편의성)
-async def get_session_service() -> SessionService:
-    """세션 서비스 인스턴스 반환"""
-    container = await SessionContainer.get_instance()
-    return await container.get("session_service")
+async def get_session_container() -> SessionContainer:
+    """세션 컨테이너 인스턴스 반환"""
+    return await SessionContainer.get_instance()
 
 
 async def get_session_repository() -> SessionRepository:
     """세션 리포지토리 인스턴스 반환"""
     container = await SessionContainer.get_instance()
     return await container.get("session_repository")
-
-
-async def get_session_container() -> SessionContainer:
-    """세션 컨테이너 인스턴스 반환"""
-    return await SessionContainer.get_instance()
