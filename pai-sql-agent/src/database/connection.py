@@ -1,28 +1,26 @@
 """
-데이터베이스 연결 관리
-비동기 및 동기 연결을 모두 지원하는 데이터베이스 매니저 클래스
+데이터베이스 연결 관리 - 비동기 전용
+한국 통계청 데이터 분석을 위한 비동기 데이터베이스 매니저
 """
 import asyncio
 from typing import AsyncGenerator, Optional
 from contextlib import asynccontextmanager
-from sqlalchemy import create_engine, Engine, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.config.settings import get_settings
-from src.database.entities import Base  # models → entities 변경
+from src.database.entities import Base
 
 
 class DatabaseManager:
-    """데이터베이스 연결 매니저"""
+    """비동기 데이터베이스 연결 매니저"""
     
     def __init__(self) -> None:
         self.settings = get_settings()
         self._async_engine: Optional[AsyncEngine] = None
-        self._sync_engine: Optional[Engine] = None
         self._async_session_factory: Optional[sessionmaker] = None
-        self._sync_session_factory: Optional[sessionmaker] = None
     
     @property
     def async_engine(self) -> AsyncEngine:
@@ -43,24 +41,6 @@ class DatabaseManager:
         return self._async_engine
     
     @property
-    def sync_engine(self) -> Engine:
-        """동기 엔진 반환"""
-        if self._sync_engine is None:
-            # PostgreSQL URL을 psycopg2 드라이버용으로 변환 (기본)
-            sync_url = self.settings.database_url.replace(
-                "postgresql+asyncpg://", "postgresql://"
-            )
-            
-            self._sync_engine = create_engine(
-                sync_url,
-                poolclass=StaticPool,
-                pool_pre_ping=True,
-                echo=False,
-                future=True
-            )
-        return self._sync_engine
-    
-    @property
     def async_session_factory(self) -> sessionmaker:
         """비동기 세션 팩토리 반환"""
         if self._async_session_factory is None:
@@ -70,16 +50,6 @@ class DatabaseManager:
                 expire_on_commit=False
             )
         return self._async_session_factory
-    
-    @property
-    def sync_session_factory(self) -> sessionmaker:
-        """동기 세션 팩토리 반환"""
-        if self._sync_session_factory is None:
-            self._sync_session_factory = sessionmaker(
-                bind=self.sync_engine,
-                expire_on_commit=False
-            )
-        return self._sync_session_factory
     
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -95,49 +65,20 @@ class DatabaseManager:
             finally:
                 await session.close()
     
-    @asynccontextmanager
-    async def get_sync_session(self) -> AsyncGenerator[Session, None]:
-        """동기 세션 컨텍스트 매니저 (비동기 컨텍스트)"""
-        session_factory = self.sync_session_factory
-        session = session_factory()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-    
     async def create_tables(self):
-        """테이블 생성 (비동기)"""
+        """테이블 생성"""
         async with self.async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     
-    def create_tables_sync(self):
-        """테이블 생성 (동기)"""
-        Base.metadata.create_all(self.sync_engine)
-    
     async def drop_tables(self):
-        """테이블 삭제 (비동기)"""
+        """테이블 삭제"""
         async with self.async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
     
-    def drop_tables_sync(self):
-        """테이블 삭제 (동기)"""
-        Base.metadata.drop_all(self.sync_engine)
-    
     async def execute_raw_sql(self, sql: str, **params):
-        """원시 SQL 실행 (비동기)"""
+        """원시 SQL 실행"""
         async with self.get_async_session() as session:
             result = await session.execute(text(sql), params)
-            return result
-    
-    def execute_raw_sql_sync(self, sql: str, **params):
-        """원시 SQL 실행 (동기)"""
-        with self.sync_session_factory() as session:
-            result = session.execute(text(sql), params)
-            session.commit()
             return result
     
     async def test_connection(self) -> bool:
@@ -153,8 +94,6 @@ class DatabaseManager:
         """연결 정리"""
         if self._async_engine:
             await self._async_engine.dispose()
-        if self._sync_engine:
-            self._sync_engine.dispose()
 
 
 # 전역 데이터베이스 매니저 인스턴스
@@ -177,26 +116,3 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     db_manager = await get_database_manager()
     async with db_manager.get_async_session() as session:
         yield session
-
-
-# 하위 호환성을 위한 동기 함수 (DEPRECATED)
-def get_database_manager_sync() -> DatabaseManager:
-    """
-    DEPRECATED: 동기 데이터베이스 매니저 반환
-    새 코드에서는 get_database_manager() 사용
-    """
-    import warnings
-    warnings.warn(
-        "get_database_manager_sync()는 deprecated입니다. "
-        "get_database_manager()를 사용하세요.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    
-    # 이미 초기화된 인스턴스가 있다면 반환
-    global _db_manager
-    if _db_manager is not None:
-        return _db_manager
-    
-    # 없다면 새로 생성 (하위 호환성)
-    return DatabaseManager()

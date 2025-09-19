@@ -21,10 +21,15 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 애플리케이션 시작")
     
     try:
-        # 데이터베이스 테이블 생성 및 초기화 작업 (비동기 호출)
-        db_manager = await get_database_manager()  # await 추가
-        await db_manager.create_tables()  # Alembic 대신 직접 테이블 생성
+        # ✅ 순서 중요: 데이터베이스 먼저 초기화
+        db_manager = await get_database_manager()
+        await db_manager.create_tables()
         logger.info("✅ 데이터베이스 테이블 생성 완료")
+        
+        # ✅ 그 다음 DI 컨테이너 초기화
+        from src.database.container import initialize_container
+        await initialize_container()
+        logger.info("✅ DI 컨테이너 초기화 완료")
         
         yield
         
@@ -35,8 +40,8 @@ async def lifespan(app: FastAPI):
         # 종료 시
         logger.info("🛑 애플리케이션 종료")
         try:
-            db_manager = await get_database_manager()  # await 추가
-            await db_manager.cleanup()  # close() -> cleanup()으로 변경
+            from src.database.container import cleanup_container
+            await cleanup_container()
         except Exception as cleanup_error:
             logger.warning(f"정리 작업 중 오류: {cleanup_error}")
 

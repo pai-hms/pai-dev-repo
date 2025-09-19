@@ -71,16 +71,26 @@ class DatabaseService:
         return await self.repository.get_database_info()
 
 
-# 싱글톤 인스턴스
+# ✅ 비동기 싱글톤 팩토리
 _database_service = None
 
 async def get_database_service() -> DatabaseService:
-    """데이터베이스 서비스 인스턴스 반환 (싱글톤)"""
+    """데이터베이스 서비스 인스턴스 반환 (비동기 싱글톤)"""
     global _database_service
     
     if _database_service is None:
-        # ✅ 수정: 함수명 변경으로 재귀 호출 방지
+        # ✅ 비동기 DI 컨테이너 사용
         from .container import get_database_service_from_container
         _database_service = await get_database_service_from_container()
     
     return _database_service
+
+
+async def reset_database_service():
+    """데이터베이스 서비스 리셋 (개발/테스트용)"""
+    global _database_service
+    _database_service = None
+    
+    # 컨테이너도 리셋
+    from .container import reset_container
+    await reset_container()

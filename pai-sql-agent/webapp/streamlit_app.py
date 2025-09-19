@@ -7,6 +7,8 @@ import requests
 import json
 import os
 import uuid
+import time
+from datetime import datetime
 from typing import Dict, Any, List, Generator
 
 # 페이지 설정 구성
@@ -117,19 +119,6 @@ with st.sidebar:
     """)
     
     st.markdown("---")
-    st.header("🔄 실시간 스트리밍")
-    
-    st.info("""
-    **자동 통합 스트리밍:**
-    • 🟢 **토큰 스트리밍**: 실시간 답변 생성
-    • 🔵 **노드 업데이트**: 처리 단계 표시
-    • 🟡 **상태 업데이트**: 그래프 상태 변화
-    • 🟣 **도구 실행**: SQL 실행 및 분석 과정
-    
-    모든 요청이 자동으로 최적화된 스트리밍으로 처리됩니다.
-    """)
-    
-    st.markdown("---")
     st.header("🗄️ 데이터베이스 정보")
     
     # 데이터베이스 정보 조회
@@ -197,6 +186,14 @@ for message in st.session_state.messages:
                 st.write(f"🟡 상태 업데이트: {info.get('state_updates', 0)}")
                 st.write(f"🟣 도구 실행: {info.get('tools_executed', 0)}")
                 st.write(f"⏱️ 응답 시간: {info.get('response_time', 0):.2f}초")
+        
+        # ✅ 진행 과정 히스토리 표시 (있는 경우)
+        if message["role"] == "assistant" and "progress_history" in message:
+            with st.expander("📋 진행 과정"):
+                for step in message["progress_history"]:
+                    timestamp = step.get("timestamp", "")
+                    content = step.get("content", "")
+                    st.write(f"**{timestamp}** - {content}")
 
 # 사용자 입력
 if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."):
@@ -207,153 +204,77 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
     with st.chat_message("user"):
         st.write(prompt)
     
-    # AI 응답 생성
+    # AI 응답 생성 부분을 완전히 간소화
     with st.chat_message("assistant"):
         response_container = st.empty()
-        status_container = st.empty()
-        progress_container = st.empty()
+        
+        # ✅ 간단한 Progress Bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # 상세 로그 (접을 수 있음)
+        with st.expander("🔍 상세 진행 로그", expanded=False):
+            log_container = st.empty()
+            log_content = []
         
         try:
-            # 실시간 통합 스트리밍
             full_response = ""
-            used_tools = []
-            error_occurred = False
+            current_progress = 0
             
-            # 스트리밍 통계
-            streaming_stats = {
-                "total_tokens": 0,
-                "nodes_executed": 0,
-                "state_updates": 0,
-                "tools_executed": 0,
-                "start_time": None,
-                "end_time": None
+            # 진행 단계 정의
+            progress_steps = {
+                "SQLAgentNode": 20,
+                "도구 실행": 40,
+                "실행 완료": 70,
+                "응답 생성": 90
             }
-            
-            node_sequence = []
             
             with st.spinner("🤖 AI가 답변을 생성하는 중..."):
                 for chunk in call_agent_stream(prompt):
                     chunk_type = chunk.get("type", "unknown")
                     
-                    # 시작 시간 기록
-                    if streaming_stats["start_time"] is None:
-                        streaming_stats["start_time"] = chunk.get("timestamp")
-                    
                     if chunk_type == "token":
-                        # 실시간 토큰 추가 (타이핑 효과)
                         token_content = chunk.get("content", "")
                         full_response += token_content
                         response_container.write(full_response + "▌")
-                        
-                        streaming_stats["total_tokens"] += 1
-                        
-                        # 진행률 표시
-                        progress = chunk.get("progress", 0)
-                        if progress > 0:
-                            progress_container.progress(progress / 100, f"생성 중... {progress:.0f}%")
                     
-                    elif chunk_type == "node_update":
-                        # 노드 실행 상태 표시
-                        node_name = chunk.get("node", "unknown")
-                        if node_name not in node_sequence:
-                            node_sequence.append(node_name)
-                            streaming_stats["nodes_executed"] += 1
+                    elif chunk_type == "progress":
+                        progress_content = chunk.get("content", "")
+                        current_time = datetime.now().strftime("%H:%M:%S")
                         
-                        status_container.info(f"🔄 노드 실행: {' → '.join(node_sequence)}")
-                    
-                    elif chunk_type == "state_update":
-                        # 그래프 상태 업데이트
-                        streaming_stats["state_updates"] += 1
-                        status_container.info("📊 그래프 상태 업데이트됨")
-                    
-                    elif chunk_type == "classification":
-                        # 요청 분류 결과
-                        request_type = chunk.get("request_type", "unknown")
-                        status_container.info(f"🔍 요청 분류: {request_type}")
-                    
-                    elif chunk_type == "tool_start":
-                        # 도구 실행 시작
-                        status_container.info(chunk.get("content", "🛠️ 도구 실행 중..."))
-                    
-                    elif chunk_type == "tool_execution":
-                        # 도구 실행 정보
-                        streaming_stats["tools_executed"] += 1
-                        tool_info = chunk.get("content", {})
+                        # ✅ Progress Bar 업데이트
+                        for key, progress_value in progress_steps.items():
+                            if key in progress_content and progress_value > current_progress:
+                                current_progress = progress_value
+                                progress_bar.progress(current_progress / 100)
+                                status_text.text(f"🔄 {progress_content}")
+                                break
                         
-                        if isinstance(tool_info, dict):
-                            tool_name = tool_info.get("tool_name", "Unknown")
-                            used_tools.append(tool_info)
-                        else:
-                            tool_name = str(tool_info)
+                        # ✅ 로그에만 추가 (중복 방지)
+                        if not log_content or log_content[-1] != progress_content:
+                            log_content.append(progress_content)
+                            log_text = "\n".join([f"[{current_time}] {msg}" for msg in log_content[-5:]])  # 최근 5개만
+                            log_container.text(log_text)
                         
-                        status_container.info(f"🛠️ 도구 실행: {tool_name}")
+                        # ✅ 중요한 단계에만 토스트
+                        if any(keyword in progress_content for keyword in ["시작", "완료"]):
+                            st.toast(progress_content, icon='🔄')
                     
                     elif chunk_type == "complete" or chunk_type == "done":
-                        # 완료 상태
-                        streaming_stats["end_time"] = chunk.get("timestamp")
-                        status_container.success(chunk.get("content", "✅ 응답 생성 완료"))
-                        
-                        total_tokens = chunk.get("total_tokens", streaming_stats["total_tokens"])
-                        if total_tokens > 0:
-                            status_container.info(f"📊 총 {total_tokens}개 토큰 생성됨")
+                        progress_bar.progress(100)
+                        status_text.text("✅ 완료!")
                         break
                     
                     elif chunk_type == "error":
                         st.error(f"오류: {chunk.get('content', 'Unknown error')}")
-                        error_occurred = True
                         break
-                    
-                    elif chunk_type == "progress":
-                        # 🎯 진행상황 표시 (새로 추가)
-                        progress_content = chunk.get("content", "")
-                        status_container.info(progress_content)
-                        
-                        # 진행상황 통계 업데이트
-                        if "SQLAgentNode" in progress_content:
-                            streaming_stats["nodes_executed"] += 1
-                        elif "도구 호출됨" in progress_content:
-                            streaming_stats["tools_executed"] += 1
-            
-            # 응답 시간 계산
-            if streaming_stats["start_time"] and streaming_stats["end_time"]:
-                from datetime import datetime
-                try:
-                    start = datetime.fromisoformat(streaming_stats["start_time"].replace('Z', '+00:00'))
-                    end = datetime.fromisoformat(streaming_stats["end_time"].replace('Z', '+00:00'))
-                    streaming_stats["response_time"] = (end - start).total_seconds()
-                except:
-                    streaming_stats["response_time"] = 0
-            
-            # 최종 응답 표시
-            if not error_occurred and full_response:
+        
+            # 완료 후 정리
+            if full_response:
                 response_container.write(full_response)
-                status_container.empty()  # 상태 메시지 제거
-                progress_container.empty()  # 진행률 제거
-                
-                # 메시지 저장 (스트리밍 정보 포함)
-                assistant_message = {
-                    "role": "assistant",
-                    "content": full_response,
-                    "used_tools": used_tools,
-                    "streaming_info": {
-                        "total_tokens": streaming_stats["total_tokens"],
-                        "nodes_executed": streaming_stats["nodes_executed"],
-                        "state_updates": streaming_stats["state_updates"],
-                        "tools_executed": streaming_stats["tools_executed"],
-                        "response_time": streaming_stats.get("response_time", 0)
-                    }
-                }
-                st.session_state.messages.append(assistant_message)
-            
-            elif not full_response and not error_occurred:
-                # 응답이 없는 경우
-                st.warning("응답을 생성하지 못했습니다. 다시 시도해주세요.")
-                
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": "죄송합니다. 응답을 생성하지 못했습니다. 다시 시도해주세요.",
-                    "used_tools": []
-                })
+                time.sleep(1)
+                progress_bar.empty()
+                status_text.empty()
         
         except Exception as e:
             response_container.error(f"클라이언트 오류: {str(e)}")

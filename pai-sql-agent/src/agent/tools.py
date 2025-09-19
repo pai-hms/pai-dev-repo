@@ -74,31 +74,31 @@ async def generate_sql_query(question: str) -> str:
         
         # 프롬프트 구성
         from src.agent.prompt import DATABASE_SCHEMA_INFO
+        from langchain_core.messages import HumanMessage, SystemMessage
         
-        prompt = f"""당신은 한국 통계청 데이터 분석 전문가입니다.
+        messages = [
+            SystemMessage(content=f"""당신은 한국 통계청 데이터 분석 전문가입니다.
 
 데이터베이스 스키마:
 {DATABASE_SCHEMA_INFO}
 
-사용자 질문: {question}
-
-위 질문에 답하기 위한 PostgreSQL SELECT 쿼리를 생성하세요.
-
+사용자 질문에 대해 적절한 PostgreSQL SELECT 쿼리를 생성해주세요.
 규칙:
 1. SELECT 문만 사용
-2. 적절한 WHERE 조건 추가
+2. 적절한 WHERE 조건 추가  
 3. ORDER BY로 정렬 (중요도순)
-4. LIMIT 10으로 결과 제한
+4. LIMIT 30으로 결과 제한
 5. 컬럼명은 스키마와 정확히 일치
 
-생성할 SQL:
-```sql
-"""
+쿼리만 반환하고 다른 설명은 포함하지 마세요."""),
+            HumanMessage(content=question)
+        ]
         
-        response = await llm_service.generate_response(prompt)
+        # ✅ 수정: 기존 generate 메서드 사용
+        response = await llm_service.generate(messages)
         
         # SQL 부분만 추출
-        sql_query = extract_sql_from_response(response)
+        sql_query = extract_sql_from_response(response.content)
         
         logger.info(f"✅ SQL 생성 완료: {sql_query[:100]}...")
         return sql_query
@@ -250,7 +250,7 @@ class SQLExecutor:
                     "error": error_msg
                 }
             
-            # ✅ Service Layer를 통한 실행
+            # Service Layer를 통한 실행
             from src.database.service import get_database_service
             db_service = await get_database_service()
             

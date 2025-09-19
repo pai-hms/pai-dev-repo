@@ -158,21 +158,10 @@ class LLMService:
         messages: List[BaseMessage],
         **kwargs
     ) -> LLMResponse:
-        """
-        LLM 응답 생성 (비스트리밍)
-        
-        Args:
-            messages: 대화 메시지 리스트
-            **kwargs: 추가 LLM 파라미터
-        
-        Returns:
-            LLM 응답 데이터
-        """
+        """LLM 응답 생성 (비스트리밍)"""
         try:
-            # 임시로 스트리밍 비활성화
-            temp_llm = self.llm.bind(streaming=False, **kwargs)
-            
-            response = await temp_llm.ainvoke(messages)
+            # ✅ 수정: streaming 파라미터 제거
+            response = await self.llm.ainvoke(messages, **kwargs)
             
             return LLMResponse(
                 content=response.content,

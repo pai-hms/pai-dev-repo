@@ -51,7 +51,7 @@ class SQLAgentService:
             
             # 세션 서비스 초기화 (컨테이너에서 가져오기)
             from .container import get_session_service
-            self._session_service = await get_session_service()  # ✅ 수정
+            self._session_service = await get_session_service()  
             
             self._initialized = True
             logger.info("SQL Agent 서비스 초기화 완료")
@@ -134,36 +134,42 @@ class SQLAgentService:
             
             # **🎯 UI 진행상황 모니터링 (추가 기능)**
             async def ui_progress_monitor():
-                """UI용 진행상황 이벤트만 별도로 스트리밍"""
+                """UI용 진행상황 이벤트만 별도로 스트리밍 (중복 제거)"""
+                seen_events = set()  # ✅ 중복 이벤트 추적
+                
                 try:
                     async for event in self._agent_graph.astream_events(
-                        initial_state,
-                        config=config,
-                        version="v1"
+                        initial_state, config=config, version="v1"
                     ):
                         event_type = event.get("event", "")
                         event_name = event.get("name", "")
                         
-                        # 노드 시작 이벤트
+                        # ✅ 이벤트 고유 키 생성
+                        event_key = f"{event_type}:{event_name}"
+                        
+                        # 노드 시작 이벤트 (중복 방지)
                         if event_type == "on_chain_start":
-                            if "agent" in event_name.lower():
-                                yield {
-                                    "type": "progress",
-                                    "content": "🤖 SQLAgentNode 실행 시작",
-                                    "timestamp": datetime.now().isoformat()
-                                }
-                            elif "tools" in event_name.lower():
-                                yield {
-                                    "type": "progress", 
-                                    "content": "🔧 도구 실행 단계 진입",
-                                    "timestamp": datetime.now().isoformat()
-                                }
-                            elif "response" in event_name.lower():
-                                yield {
-                                    "type": "progress",
-                                    "content": "💬 사용자 친화적 응답 생성 중...",
-                                    "timestamp": datetime.now().isoformat()
-                                }
+                            if event_key not in seen_events:
+                                seen_events.add(event_key)
+                                
+                                if "agent" in event_name.lower():
+                                    yield {
+                                        "type": "progress",
+                                        "content": "🤖 SQLAgentNode 실행 시작",
+                                        "timestamp": datetime.now().isoformat()
+                                    }
+                                elif "tools" in event_name.lower():
+                                    yield {
+                                        "type": "progress", 
+                                        "content": "🔧 도구 실행 단계 진입",
+                                        "timestamp": datetime.now().isoformat()
+                                    }
+                                elif "response" in event_name.lower():
+                                    yield {
+                                        "type": "progress",
+                                        "content": "💬 사용자 친화적 응답 생성 중...",
+                                        "timestamp": datetime.now().isoformat()
+                                    }
                         
                         # LLM 추론 시작
                         elif event_type == "on_chat_model_start":
@@ -173,26 +179,34 @@ class SQLAgentService:
                                 "timestamp": datetime.now().isoformat()
                             }
                         
-                        # 도구 호출 시작
+                        # 도구 이벤트 (도구별로 한 번만)
                         elif event_type == "on_tool_start":
                             tool_name = event.get("name", "Unknown")
-                            yield {
-                                "type": "progress",
-                                "content": f"🔧 {tool_name} 도구 호출됨",
-                                "timestamp": datetime.now().isoformat()
-                            }
+                            tool_key = f"tool_start:{tool_name}"
+                            
+                            if tool_key not in seen_events:
+                                seen_events.add(tool_key)
+                                yield {
+                                    "type": "progress",
+                                    "content": f"🔧 {tool_name} 도구 호출됨",
+                                    "timestamp": datetime.now().isoformat()
+                                }
                         
                         # 도구 실행 완료
                         elif event_type == "on_tool_end":
                             tool_name = event.get("name", "Unknown")
-                            output = event.get("data", {}).get("output", "")
-                            result_count = "결과 있음" if output and "데이터 없음" not in str(output) else "결과 없음"
+                            tool_key = f"tool_end:{tool_name}"
                             
-                            yield {
-                                "type": "progress",
-                                "content": f"📊 {tool_name} 실행 완료 - {result_count}",
-                                "timestamp": datetime.now().isoformat()
-                            }
+                            if tool_key not in seen_events:
+                                seen_events.add(tool_key)
+                                output = event.get("data", {}).get("output", "")
+                                result_count = "결과 있음" if output and "데이터 없음" not in str(output) else "결과 없음"
+                                
+                                yield {
+                                    "type": "progress",
+                                    "content": f"📊 {tool_name} 실행 완료 - {result_count}",
+                                    "timestamp": datetime.now().isoformat()
+                                }
                 
                 except Exception as e:
                     logger.error(f"UI 진행상황 모니터링 오류: {e}")
