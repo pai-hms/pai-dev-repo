@@ -1,35 +1,24 @@
 """
-Database DI Container - 비동기 리소스 지원
-데이터베이스 관련 서비스들의 의존성 주입을 관리
+Database DI Container - 단순화된 Repository 중심 구조
+Repository가 데이터 제어권을 담당하는 아키텍처
 """
 import logging
 import asyncio
 from dependency_injector import containers, providers
 
-from .connection import DatabaseManager, get_database_manager
-from .repository import DatabaseRepository
-from .service import DatabaseService
+from .connection import get_database_manager
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseContainer(containers.DeclarativeContainer):
-    """Database 모듈 DI 컨테이너"""
+    """Database 모듈 DI 컨테이너 - 단순화"""
     
     # 기본 설정
     config = providers.Configuration()
     
-    # ✅ 비동기 리소스 정의
+    # ✅ DatabaseManager만 관리 (Repository는 세션별로 생성)
     database_manager = providers.Resource(get_database_manager)
-    
-    # Repository Layer - 세션 팩토리를 통한 생성
-    # 주의: DatabaseRepository는 실제로는 세션 컨텍스트에서 생성되어야 함
-    
-    # Service Layer - DatabaseManager를 통한 생성
-    database_service = providers.Factory(
-        DatabaseService,
-        database_manager=database_manager
-    )
 
 
 # 전역 컨테이너 인스턴스
@@ -54,9 +43,7 @@ async def initialize_container():
         logger.info("🔧 DI 컨테이너 비동기 리소스 초기화 시작")
         
         try:
-            # ✅ 핵심: 비동기 리소스들을 먼저 초기화
             await container.init_resources()
-            
             _initialized = True
             logger.info("✅ DI 컨테이너 비동기 리소스 초기화 완료")
             
@@ -71,28 +58,10 @@ async def get_database_container() -> DatabaseContainer:
     return container
 
 
-async def get_database_service_from_container() -> DatabaseService:
-    """데이터베이스 서비스 인스턴스 반환 (비동기)"""
-    await initialize_container()  # ✅ 먼저 비동기 리소스 초기화
-    
-    try:
-        # ✅ 초기화된 후에는 동기적으로 접근 가능
-        service = container.database_service()
-        logger.info("✅ 데이터베이스 서비스 반환 완료")
-        return service
-        
-    except Exception as e:
-        logger.error(f"❌ 데이터베이스 서비스 생성 실패: {e}")
-        raise
-
-
-async def get_database_manager_from_container() -> DatabaseManager:
+async def get_database_manager_from_container():
     """데이터베이스 매니저 반환 (비동기)"""
     await initialize_container()
     return container.database_manager()
-
-
-# DatabaseRepository는 세션 컨텍스트에서만 생성되므로 컨테이너에서 직접 제공하지 않음
 
 
 async def cleanup_container():
@@ -117,3 +86,7 @@ async def reset_container():
     await cleanup_container()
     await initialize_container()
     logger.info("🔄 DI 컨테이너 리셋 완료")
+
+
+# ✅ DatabaseService는 더 이상 Container에서 관리하지 않음
+# Repository 중심 아키텍처에서는 Service가 직접 DatabaseManager를 사용

@@ -1,4 +1,5 @@
 import logging
+import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,8 @@ from webapp.routers import agent, data
 from webapp.models import ErrorResponse
 from src.config.settings import get_settings
 from src.database.connection import get_database_manager
+from src.session.entities import AgentSessionEntity
+from src.database.container import initialize_container, cleanup_container
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -26,21 +29,27 @@ async def lifespan(app: FastAPI):
         await db_manager.create_tables()
         logger.info("✅ 데이터베이스 테이블 생성 완료")
         
+        # ✅ 세션 테이블도 명시적으로 확인
+        try:
+            async with db_manager.async_engine.begin() as conn:
+                await conn.run_sync(AgentSessionEntity.metadata.create_all)
+            logger.info("✅ 세션 테이블 생성 확인 완료")
+        except Exception as e:
+            logger.warning(f"⚠️ 세션 테이블 생성 확인 중 오류: {e}")
+        
         # ✅ 그 다음 DI 컨테이너 초기화
-        from src.database.container import initialize_container
         await initialize_container()
         logger.info("✅ DI 컨테이너 초기화 완료")
         
         yield
         
     except Exception as e:
-        logger.error(f"❌ 애플리케이션 시작 중 오류: {str(e)}")
+        logger.error(f"❌ 애플리케이션 시작 실패: {e}")
         raise
     finally:
         # 종료 시
         logger.info("🛑 애플리케이션 종료")
         try:
-            from src.database.container import cleanup_container
             await cleanup_container()
         except Exception as cleanup_error:
             logger.warning(f"정리 작업 중 오류: {cleanup_error}")
@@ -141,8 +150,6 @@ async def general_exception_handler(request, exc):
 
 
 if __name__ == "__main__":
-    import uvicorn
-    
     settings = get_settings()
     uvicorn.run(
         "webapp.main:app",

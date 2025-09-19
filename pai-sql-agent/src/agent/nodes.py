@@ -11,6 +11,7 @@ from langgraph.graph.message import add_messages
 
 from src.agent.prompt import DATABASE_SCHEMA_INFO
 from src.llm.service import get_llm_service
+from src.session.service import get_session_service
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +24,29 @@ class SQLAgentState(TypedDict):
     data: str
 
 
-def create_initial_state(query: str, thread_id: str = "default") -> SQLAgentState:
-    """초기 상태 생성"""
+async def create_initial_state(query: str, thread_id: str = "default") -> SQLAgentState:
+    """초기 상태 생성 - 세션 히스토리 포함"""
+    messages = []
+    
+    try:
+        # ✅ PostgresSaver가 멀티턴 대화를 처리하므로 Session Service는 비활성화
+        # 단순히 현재 질문만 추가
+        messages.append(HumanMessage(content=query))
+        logger.info(f"📚 PostgresSaver를 통한 멀티턴 대화 활성화 (thread_id: {thread_id})")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ 메시지 처리 실패: {e}")
+        # Fallback: 기본 메시지만 사용
+        messages = [HumanMessage(content=query)]
+    
     return {
-        "messages": [HumanMessage(content=query)],
+        "messages": messages,
         "query": query,
         "sql_query": "",
         "data": ""
     }
+
+
 
 
 class SQLPromptNode:
@@ -39,29 +55,25 @@ class SQLPromptNode:
     def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
         logger.info("📝 SQLPromptNode 실행 시작")
         logger.info(f"   입력 쿼리: '{state.get('query', '')}'")
+        logger.info(f"   기존 메시지 수: {len(state.get('messages', []))}")
         
-        
-        system_prompt = f"""당신은 한국 통계청 데이터 전문 SQL 분석가입니다.
+        # ✅ 시스템 프롬프트를 맨 앞에 추가
+        system_prompt = f"""당신은 데이터 전문 SQL 분석가입니다.
 
 데이터베이스 스키마:
 {DATABASE_SCHEMA_INFO}
 
-사용자 질문에 대해 적절한 SQL 쿼리를 생성하고 실행해주세요.
-반드시 sql_db_query 도구를 사용하여 쿼리를 실행하세요."""
+**응답 가이드라인:**
+1. 데이터 관련 질문: SQL 쿼리를 생성하고 sql_db_query 도구로 실행
+2. 인사말/간단한 질문: 친근하게 응답하고 도움이 필요한 경우 제안
+3. 모든 응답은 한국어로 작성
 
-        logger.info(f"   생성된 시스템 프롬프트 길이: {len(system_prompt)}글자")
-        logger.info("   시스템 프롬프트 미리보기:")
-        logger.info(f"   {system_prompt[:200]}...")
+이전 대화 맥락을 고려하여 연속적인 대화를 지원해주세요."""
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=state["query"])
-        ]
+        # 기존 메시지에 시스템 프롬프트만 앞에 추가
+        messages = [SystemMessage(content=system_prompt)] + state.get("messages", [])
         
-        logger.info(f"   최종 메시지 구성: System({len(system_prompt)}글자) + Human({len(state['query'])}글자)")
-        logger.info(f"   LLM에 전달할 메시지:")
-        logger.info(f"      [System] 시스템 프롬프트 ({len(system_prompt)}글자)")
-        logger.info(f"      [Human] '{state['query']}'")
+        logger.info(f"   최종 메시지 구성: System + {len(state.get('messages', []))}개 히스토리")
         
         return {"messages": messages}
 
@@ -80,11 +92,15 @@ class SQLAgentNode:
             logger.info(f"   도구 목록: {[tool.name for tool in self.tools]}")
             logger.info(f"   입력 메시지 수: {len(state.get('messages', []))}")
             
-            # 마지막 메시지 확인 (사용자 질문)
+            # ✅ 사용자 질문 추출 (시스템 메시지 제외)
+            user_question = "질문 없음"
             if state.get('messages'):
-                last_message = state['messages'][-1]
-                if hasattr(last_message, 'content'):
-                    logger.info(f"👤 분석할 사용자 질문: '{last_message.content}'")
+                # 마지막 Human 메시지 찾기
+                for msg in reversed(state['messages']):
+                    if hasattr(msg, 'content') and msg.__class__.__name__ == 'HumanMessage':
+                        user_question = msg.content
+                        break
+                logger.info(f"👤 분석할 사용자 질문: '{user_question}'")
             
             llm_with_tools = self.llm_service.llm.bind_tools(self.tools)
             logger.info("🔧 LLM에 도구 바인딩 완료")
@@ -121,7 +137,6 @@ class SQLAgentNode:
             logger.error(f"❌ SQL Agent 노드 오류: {e}", exc_info=True)
             error_message = AIMessage(content=f"처리 중 오류가 발생했습니다: {str(e)}")
             return {"messages": [error_message]}
-
 
 class SQLSummaryNode:
     """SQL 결과 요약 노드"""
@@ -162,11 +177,7 @@ class SQLResponseNode:
             query = state.get("query", "")
             sql_query = state.get("sql_query", "")
             data = state.get("data", "")
-            
-            if not data:
-                # 데이터가 없으면 기본 응답
-                response = AIMessage(content="죄송합니다. 요청하신 데이터를 찾을 수 없습니다.")
-                return {"messages": [response]}
+        
             
             # LLM을 사용해 최종 응답 생성
             response_prompt = f"""다음 정보를 바탕으로 사용자에게 친화적이고 이해하기 쉬운 답변을 생성해주세요.
@@ -193,6 +204,7 @@ class SQLResponseNode:
             
             response = await llm_service.llm.ainvoke(messages)
             
+            # ✅ PostgresSaver가 자동으로 상태를 저장하므로 수동 저장 불필요
             logger.info(f"최종 응답 생성 완료: {len(response.content)} 글자")
             return {"messages": [response]}
             
@@ -200,3 +212,4 @@ class SQLResponseNode:
             logger.error(f"응답 생성 오류: {e}")
             error_response = AIMessage(content=f"응답 생성 중 오류가 발생했습니다: {str(e)}")
             return {"messages": [error_response]}
+

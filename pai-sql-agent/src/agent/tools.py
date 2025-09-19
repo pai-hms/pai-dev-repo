@@ -38,12 +38,14 @@ async def sql_db_query(query: str) -> str:
         db_service = await get_database_service()
         
         logger.info("🚀 SQL 쿼리 실행 시작...")
-        result = await db_service.execute_safe_query(query)
+        result = await db_service.execute_custom_query(query)
         
-        logger.info(f"📊 쿼리 실행 완료 - 결과 수: {result.total_count}")
+        logger.info(f"📊 쿼리 실행 완료 - 결과 수: {result.row_count}")
         
-        if result.is_empty():
-            logger.info("⚠️ 결과 없음 - 빈 결과 반환")
+        if not result.success or not result.data:
+            logger.info("⚠️ 결과 없음 또는 실행 실패")
+            if not result.success:
+                return f"쿼리 실행 실패: {result.error}"
             return "쿼리 실행 결과: 데이터 없음"
         
         # 결과를 테이블 형태로 포맷팅
@@ -252,12 +254,19 @@ class SQLExecutor:
             # Service Layer를 통한 실행
             db_service = await get_database_service()
             
-            result = await db_service.execute_safe_query(query)
+            result = await db_service.execute_custom_query(query)
+            
+            if not result.success:
+                return {
+                    "success": False,
+                    "result": f"쿼리 실행 실패: {result.error}",
+                    "error": result.error
+                }
             
             return {
                 "success": True,
                 "result": format_query_results(result.data),
-                "row_count": result.total_count
+                "row_count": result.row_count
             }
             
         except Exception as e:

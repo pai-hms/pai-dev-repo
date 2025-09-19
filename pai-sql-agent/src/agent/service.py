@@ -10,7 +10,6 @@ from datetime import datetime
 from .graph import create_sql_agent_graph
 from .nodes import create_initial_state
 from .container import get_container
-from src.session.service import get_session_service
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +49,8 @@ class SQLAgentService:
             # SQL Agent 그래프 생성
             self._agent_graph = await create_sql_agent_graph()
             
-            # 세션 서비스 초기화 - 직접 import 사용
-            self._session_service = await get_session_service()  
+            # ✅ PostgresSaver 사용으로 별도 세션 서비스 불필요
+            # self._session_service = await get_session_service()   
             
             self._initialized = True
             logger.info("SQL Agent 서비스 초기화 완료")
@@ -73,7 +72,7 @@ class SQLAgentService:
                 await self._initialize()
             
             # 초기 상태 생성
-            initial_state = create_initial_state(question, thread_id or session_id or "default")
+            initial_state = await create_initial_state(question, thread_id or session_id or "default")
             
             # 그래프 실행
             config = {
@@ -111,13 +110,16 @@ class SQLAgentService:
             if not self._initialized:
                 await self._initialize()
         
-            # 초기 상태 생성
-            initial_state = create_initial_state(question, thread_id or session_id or "default")
+            # ✅ 세션 히스토리를 포함한 초기 상태 생성
+            initial_state = await create_initial_state(question, thread_id or session_id or "default")
         
             config = {
                 "configurable": {"thread_id": thread_id or session_id or "default"},
                 "recursion_limit": 50
             }
+            
+            # 최종 응답 저장을 위한 변수
+            final_response = None
         
             # 시작 신호
             yield {
@@ -131,124 +133,24 @@ class SQLAgentService:
             token_count = 0
             
             
-            # **🎯 UI 진행상황 모니터링 (추가 기능)**
-            async def ui_progress_monitor():
-                """UI용 진행상황 이벤트만 별도로 스트리밍 (중복 제거)"""
-                seen_events = set()  # ✅ 중복 이벤트 추적
-                
-                try:
-                    async for event in self._agent_graph.astream_events(
-                        initial_state, config=config, version="v1"
-                    ):
-                        event_type = event.get("event", "")
-                        event_name = event.get("name", "")
-                        
-                        # ✅ 이벤트 고유 키 생성
-                        event_key = f"{event_type}:{event_name}"
-                        
-                        # 노드 시작 이벤트 (중복 방지)
-                        if event_type == "on_chain_start":
-                            if event_key not in seen_events:
-                                seen_events.add(event_key)
-                                
-                                if "agent" in event_name.lower():
-                                    yield {
-                                        "type": "progress",
-                                        "content": "🤖 SQLAgentNode 실행 시작",
-                                        "timestamp": datetime.now().isoformat()
-                                    }
-                                elif "tools" in event_name.lower():
-                                    yield {
-                                        "type": "progress", 
-                                        "content": "🔧 도구 실행 단계 진입",
-                                        "timestamp": datetime.now().isoformat()
-                                    }
-                                elif "response" in event_name.lower():
-                                    yield {
-                                        "type": "progress",
-                                        "content": "💬 사용자 친화적 응답 생성 중...",
-                                        "timestamp": datetime.now().isoformat()
-                                    }
-                        
-                        # LLM 추론 시작
-                        elif event_type == "on_chat_model_start":
-                            yield {
-                                "type": "progress",
-                                "content": "🧠 LLM 추론 시작 - 질문 분석 및 도구 선택...",
-                                "timestamp": datetime.now().isoformat()
-                            }
-                        
-                        # 도구 이벤트 (도구별로 한 번만)
-                        elif event_type == "on_tool_start":
-                            tool_name = event.get("name", "Unknown")
-                            tool_key = f"tool_start:{tool_name}"
-                            
-                            if tool_key not in seen_events:
-                                seen_events.add(tool_key)
-                                yield {
-                                    "type": "progress",
-                                    "content": f"🔧 {tool_name} 도구 호출됨",
-                                    "timestamp": datetime.now().isoformat()
-                                }
-                        
-                        # 도구 실행 완료
-                        elif event_type == "on_tool_end":
-                            tool_name = event.get("name", "Unknown")
-                            tool_key = f"tool_end:{tool_name}"
-                            
-                            if tool_key not in seen_events:
-                                seen_events.add(tool_key)
-                                output = event.get("data", {}).get("output", "")
-                                result_count = "결과 있음" if output and "데이터 없음" not in str(output) else "결과 없음"
-                                
-                                yield {
-                                    "type": "progress",
-                                    "content": f"📊 {tool_name} 실행 완료 - {result_count}",
-                                    "timestamp": datetime.now().isoformat()
-                                }
-                
-                except Exception as e:
-                    logger.error(f"UI 진행상황 모니터링 오류: {e}")
+            # **🎯 단일 스트림으로 통합 (중복 실행 방지)**
             
-            # **병렬 실행: 기존 스트리밍 + UI 진행상황**
+            # **단순화된 스트리밍 (중복 실행 방지)**
             async def merge_streams():
-                """기존 토큰 스트리밍과 UI 진행상황을 병합"""
+                """단일 스트림으로 토큰 및 진행상황 모니터링"""
                 
-                # UI 진행상황 스트림
-                ui_stream = ui_progress_monitor()
-                
-                # 기존 토큰 스트리밍
+                # ✅ 하나의 스트림만 사용
                 token_stream = self._agent_graph.astream(
                     initial_state,
                     config=config,
                     stream_mode="messages"
                 )
                 
-                # 두 스트림을 병합
-                ui_task = None
-                
                 try:
-                    # UI 모니터링 태스크 시작
-                    ui_gen = aiter(ui_stream)
-                    ui_task = asyncio.create_task(anext(ui_gen))
-                    
                     # 메인 토큰 스트리밍
                     async for chunk in token_stream:
                         nonlocal chunk_count, token_count
                         chunk_count += 1
-                        
-                        # UI 이벤트 체크 (논블로킹)
-                        if ui_task and ui_task.done():
-                            try:
-                                ui_event = ui_task.result()
-                                yield ui_event
-                                # 다음 UI 이벤트 대기
-                                ui_task = asyncio.create_task(anext(ui_gen))
-                            except StopAsyncIteration:
-                                ui_task = None
-                            except Exception as e:
-                                logger.warning(f"UI 이벤트 처리 오류: {e}")
-                                ui_task = None
                         
                         # 기존 토큰 스트리밍 로직 (변경 없음)
                         if isinstance(chunk, tuple) and len(chunk) >= 1:
@@ -286,31 +188,31 @@ class SQLAgentService:
                         else:
                             logger.warning(f"⚠️ 예상치 못한 chunk 형태: {type(chunk)}")
                     
-                    # 남은 UI 이벤트들 처리
-                    while ui_task and not ui_task.done():
-                        try:
-                            ui_event = await ui_task
-                            yield ui_event
-                            ui_task = asyncio.create_task(anext(ui_gen))
-                        except StopAsyncIteration:
-                            break
-                        except Exception as e:
-                            logger.warning(f"남은 UI 이벤트 처리 오류: {e}")
-                            break
-                    
-                finally:
-                    # 정리
-                    if ui_task and not ui_task.done():
-                        ui_task.cancel()
+                except Exception as stream_error:
+                    logger.error(f"스트리밍 처리 오류: {stream_error}")
+                    yield {
+                        "type": "error",
+                        "content": f"스트리밍 오류: {str(stream_error)}",
+                        "timestamp": datetime.now().isoformat()
+                    }
                 
                 logger.info(f"📊 스트리밍 완료 - 총 chunk: {chunk_count}, 토큰: {token_count}")
             
-            # **LangGraph 공식 방식 + UI 진행상황**
+            # **✅ 단순화된 스트리밍 방식**
             try:
-                logger.info("🔍 스트리밍 시작 - stream_mode='messages' + UI 진행상황")
+                logger.info("🔍 스트리밍 시작 - stream_mode='messages'")
                 
                 async for result_chunk in merge_streams():
+                    # ✅ 최종 응답 캐시
+                    if result_chunk.get("type") == "token":
+                        if final_response is None:
+                            final_response = ""
+                        final_response += result_chunk.get("content", "")
+                    
                     yield result_chunk
+                
+                # PostgresSaver가 자동으로 상태를 저장하므로 수동 저장 불필요
+                logger.info(f"📝 PostgresSaver를 통해 대화 상태 자동 저장됨 (thread_id: {thread_id})")
             
             except Exception as stream_error:
                 logger.error(f"❌ 스트리밍 오류: {stream_error}")
@@ -387,6 +289,3 @@ async def get_sql_agent_service() -> SQLAgentService:
     return await SQLAgentService.get_instance()
 
 
-# 하위 호환성을 위한 별칭
-get_unified_agent_service = get_sql_agent_service
-get_main_agent_service = get_sql_agent_service

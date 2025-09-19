@@ -47,12 +47,13 @@ API_BASE_URL = get_api_base_url()
 
 # API 호출 함수 (통합 스트리밍)
 def call_agent_stream(question: str) -> Generator[Dict[str, Any], None, None]:
-    """통합 스트리밍 API 호출 - 모든 요청이 자동으로 스트리밍"""
+    """통합 스트리밍 API 호출 - 멀티턴 대화 지원"""
     try:
         url = f"{API_BASE_URL}/api/agent/query"
         payload = {
             "question": question,
             "session_id": st.session_state.session_id,
+            "thread_id": st.session_state.session_id,  # ✅ thread_id로도 동일한 ID 사용
             "stream_mode": "all"  # 모든 스트리밍 정보 포함
         }
         
@@ -146,17 +147,8 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # 세션 관리
-    if st.button("🗑️ 대화 기록 삭제"):
-        st.session_state.messages = []
-        st.success("대화 기록이 삭제되었습니다.")
-        st.rerun()
-    
-    if st.button("🔄 새 세션 시작"):
-        st.session_state.session_id = str(uuid.uuid4())
-        st.session_state.messages = []
-        st.success("새 세션이 시작되었습니다.")
-        st.rerun()
+    # 세션 정보 간단 표시
+    st.write(f"**세션 ID**: `{st.session_state.session_id[:8]}...`")
 
 # 대화 기록 표시
 st.markdown("---")
@@ -319,6 +311,8 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                 "content": f"죄송합니다. 클라이언트 오류가 발생했습니다: {str(e)}",
                 "used_tools": []
             })
+
+
 
 # 푸터
 st.markdown("---")

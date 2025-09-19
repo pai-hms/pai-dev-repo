@@ -107,39 +107,6 @@ SQL_AGENT_SYSTEM_PROMPT = """
 항상 단계별로 작업하며, 각 단계의 결과를 확인한 후 다음 단계로 진행하세요.
 """
 
-# ========================================
-# ReAct Agent 프롬프트 (하위 호환성)
-# ========================================
-
-REACT_AGENT_INITIAL_PROMPT = """
-당신은 한국 통계청 데이터 분석 전문가입니다.
-
-사용자의 질문에 답하기 위해 다음 도구들을 사용할 수 있습니다:
-- get_database_schema_info: 데이터베이스 스키마 정보 조회
-- generate_sql_query: 자연어 질문을 SQL 쿼리로 변환
-- validate_sql_query: SQL 쿼리 검증
-- execute_sql_query: SQL 쿼리 실행
-
-**작업 방식:**
-1. 먼저 사용자 질문을 분석합니다
-2. 필요한 경우 스키마 정보를 확인합니다
-3. SQL 쿼리를 생성하고 검증합니다
-4. 쿼리를 실행하여 결과를 얻습니다
-5. 결과를 분석하여 사용자에게 의미있는 답변을 제공합니다
-
-사용자 질문: {input}
-
-생각 과정을 단계별로 설명하고, 적절한 도구를 사용하여 답변하세요.
-"""
-
-REACT_AGENT_RESPONSE_PROMPT = """
-이전 작업 결과를 바탕으로 계속 진행하겠습니다.
-
-현재까지의 진행상황:
-{agent_scratchpad}
-
-다음 단계를 수행하거나 최종 답변을 제공하세요.
-"""
 
 SQL_GENERATION_PROMPT = """
 사용자 질문을 분석하여 한국 통계청 데이터베이스에 적합한 SQL 쿼리를 생성하세요.
@@ -258,14 +225,6 @@ def get_sql_agent_system_prompt() -> str:
     return SQL_AGENT_SYSTEM_PROMPT.format(schema_info=DATABASE_SCHEMA_INFO)
 
 
-def get_react_agent_initial_prompt(input: str) -> str:
-    """ReAct Agent 초기 프롬프트 반환 (하위 호환성)"""
-    return REACT_AGENT_INITIAL_PROMPT.format(input=input)
-
-
-def get_react_agent_response_prompt(agent_scratchpad: str) -> str:
-    """ReAct Agent 응답 프롬프트 반환 (하위 호환성)"""
-    return REACT_AGENT_RESPONSE_PROMPT.format(agent_scratchpad=agent_scratchpad)
 
 
 def get_sql_generation_prompt(question: str, region_info: str = "", schema_info: str = "") -> str:
@@ -305,36 +264,6 @@ def get_step_by_step_prompt(question: str, current_step: str, previous_results: 
 
 
 # ========================================
-# 기존 프롬프트 (하위 호환성)
-# ========================================
-
-def get_system_prompt(agent_type: str = "sql_agent") -> str:
-    """시스템 프롬프트 반환 (하위 호환성)"""
-    if agent_type == "sql_agent":
-        return get_sql_agent_system_prompt()
-    else:
-        return get_sql_agent_system_prompt()  # 기본값
-
-
-def create_prompt_generator():
-    """프롬프트 생성기 생성 (하위 호환성)"""
-    class PromptGenerator:
-        def get_system_prompt(self, agent_type: str = "sql_agent") -> str:
-            return get_system_prompt(agent_type)
-        
-        def get_sql_generation_prompt(self, question: str, **kwargs) -> str:
-            return get_sql_generation_prompt(question, **kwargs)
-        
-        def get_analysis_prompt(self, question: str, sql_query: str, result: str) -> str:
-            return get_sql_analysis_prompt(question, sql_query, result)
-        
-        def get_react_agent_initial_prompt(self, input: str) -> str:
-            return get_react_agent_initial_prompt(input)
-        
-        def get_react_agent_response_prompt(self, agent_scratchpad: str) -> str:
-            return get_react_agent_response_prompt(agent_scratchpad)
-    
-    return PromptGenerator()
 
 
 def get_enhanced_sql_agent_prompt() -> str:
@@ -373,4 +302,7 @@ def get_enhanced_sql_agent_prompt() -> str:
 📊 **데이터베이스 정보**:
 {get_database_schema()}
 
-이제 사용자의 질문에 단계별로 체계적으로 답변해주세요."""
+이제 사용자의 질문에 단계별로 체계적으로 답변해주세요. 
+
+
+"""

@@ -43,6 +43,8 @@ services:
     container_name: pai-sql-agent-streamlit
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
+      - ENABLE_MEMORY=true
+      - POSTGRES_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - LLM_PROVIDER=${LLM_PROVIDER:-}

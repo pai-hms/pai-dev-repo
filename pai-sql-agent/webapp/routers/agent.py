@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from webapp.models import QueryRequest
 from src.agent.service import get_sql_agent_service
+from src.session.service import get_session_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -31,23 +32,31 @@ def safe_json_dumps(obj):
 
 @router.post("/query")
 async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
-    """SQL Agent 스트리밍 API"""
+    """SQL Agent 스트리밍 API - 멀티턴 대화 지원"""
     
     async def generate_stream():
+        # ✅ 세션 관리 개선: session_id를 thread_id로 사용
         session_id = request.session_id or str(uuid.uuid4())
+        thread_id = request.thread_id or session_id  # thread_id가 없으면 session_id 사용
         
         try:
             logger.info(f"SQL Agent 요청: {request.question[:50]}...")
+            logger.info(f"세션 정보 - session_id: {session_id}, thread_id: {thread_id}")
             
             # SQL Agent 서비스 가져오기
             agent_service = await get_sql_agent_service()
             
-            # 스트리밍 처리
+            # ✅ 멀티턴 대화를 위한 스트리밍 처리
             async for chunk in agent_service.process_query_stream(
                 question=request.question,
-                thread_id=request.thread_id,
-                session_id=session_id
+                thread_id=thread_id,  # 멀티턴 대화용 ID
+                session_id=session_id  # API 레벨 세션 ID
             ):
+                # 클라이언트에게 세션 정보 전달
+                if chunk.get("type") == "start":
+                    chunk["session_id"] = session_id
+                    chunk["thread_id"] = thread_id
+                
                 yield f"data: {safe_json_dumps(chunk)}\n\n"
             
         except Exception as e:
@@ -56,6 +65,7 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
                 "type": "error",
                 "content": f"처리 중 오류가 발생했습니다: {str(e)}",
                 "session_id": session_id,
+                "thread_id": thread_id,
                 "timestamp": time.time()
             }
             yield f"data: {safe_json_dumps(error_chunk)}\n\n"
@@ -87,5 +97,69 @@ async def get_agent_status():
             "success": False,
             "status": "error",
             "message": str(e),
+            "timestamp": time.time()
+        }
+
+
+# ✅ 새로운 엔드포인트: 세션 관리
+@router.get("/sessions/{session_id}")
+async def get_session_info(session_id: str):
+    """세션 정보 조회"""
+    try:
+        session_service = await get_session_service()
+        
+        if session_service:
+            session = await session_service.get_session(session_id)
+            messages = await session_service.get_session_messages(session_id, limit=50)
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "exists": session is not None,
+                "message_count": len(messages),
+                "messages": messages[-10:],  # 최근 10개만
+                "timestamp": time.time()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "세션 서비스를 사용할 수 없습니다",
+                "timestamp": time.time()
+            }
+            
+    except Exception as e:
+        logger.error(f"세션 정보 조회 오류: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }
+
+
+@router.delete("/sessions/{session_id}")
+async def clear_session(session_id: str):
+    """세션 대화 기록 삭제"""
+    try:
+        session_service = await get_session_service()
+        
+        if session_service:
+            success = await session_service.close_session(session_id)
+            return {
+                "success": success,
+                "message": "세션이 정리되었습니다" if success else "세션을 찾을 수 없습니다",
+                "timestamp": time.time()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "세션 서비스를 사용할 수 없습니다",
+                "timestamp": time.time()
+            }
+            
+    except Exception as e:
+        logger.error(f"세션 삭제 오류: {e}")
+        return {
+            "success": False,
+            "error": str(e),
             "timestamp": time.time()
         }

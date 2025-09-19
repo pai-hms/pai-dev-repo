@@ -441,12 +441,17 @@ class DatabaseRepository:
         self.household_member = HouseholdMemberRepository(session)
         self.crawl_log = CrawlLogRepository(session)
     
-    async def execute_raw_query(self, query: str) -> List[Dict[str, Any]]:
-        """원시 SQL 쿼리 실행 - 에이전트 도구용"""
+    async def execute_raw_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
+        """원시 SQL 쿼리 실행 - 에이전트 도구용 (파라미터 지원)"""
         
         try:
-            # SQL 쿼리 실행
-            result = await self.session.execute(text(query))
+            # SQL 쿼리 실행 (파라미터 지원)
+            if params:
+                # 파라미터가 있는 경우
+                result = await self.session.execute(text(query), params)
+            else:
+                # 파라미터가 없는 경우
+                result = await self.session.execute(text(query))
             
             # 결과를 딕셔너리 리스트로 변환 (generator 패턴 방지)
             columns = list(result.keys())  # list()로 즉시 변환
@@ -461,9 +466,11 @@ class DatabaseRepository:
             # 오류 발생 시 로깅
             logger.error(f"❌ SQL 실행 실패: {e}")
             logger.error(f"📝 실행된 쿼리: {query}")
+            if params:
+                logger.error(f"📝 파라미터: {params}")
             logger.error(f"🔍 오류 타입: {type(e).__name__}")
             
-            # 오류 발생 시 빈 리스트 반환 (raise 하지 않고 빈 리스트 반환으로 generator 패턴 방지)
+            # 오류 발생 시 빈 리스트 반환
             return []
     
     async def get_table_schema(self, table_name: str) -> List[Dict[str, Any]]:

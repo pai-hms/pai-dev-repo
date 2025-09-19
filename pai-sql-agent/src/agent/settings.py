@@ -1,6 +1,7 @@
 """
 SQL Agent 설정 관리 - 비동기 통일 버전
 """
+import os
 from typing import Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -15,13 +16,16 @@ class AgentSettings(BaseSettings):
         description="Agent State를 관리하는 DATABASE URL",
     )
     
+    # ✅ PostgresSaver 설정 - DATABASE_URL과 동일하게 사용
+    enable_memory: bool = Field(default=True, description="메모리(PostgresSaver) 활성화")
+    
     # 에이전트 동작 설정
     max_iterations: int = Field(default=3, description="최대 반복 횟수")
     timeout_seconds: int = Field(default=30, description="타임아웃 시간 (초)")
     max_result_rows: int = Field(default=50, description="최대 결과 행 수")
     query_timeout: int = Field(default=10, description="쿼리 타임아웃 (초)")
     
-    # 체크포인터 설정
+    # 체크포인터 설정 (기존 유지)
     enable_checkpointer: bool = Field(default=True, description="체크포인터 활성화")
     
     # 스트리밍 설정
@@ -34,42 +38,30 @@ class AgentSettings(BaseSettings):
     # # SGIS API 설정 (선택적)
     # sgis_service_id: Optional[str] = Field(default=None, description="SGIS 서비스 ID")
     # sgis_security_key: Optional[str] = Field(default=None, description="SGIS 보안 키")
-    # sgis_access_token: Optional[str] = Field(default=None, description="SGIS 액세스 토큰")
-    # sgis_secret_key: Optional[str] = Field(default=None, description="SGIS 시크릿 키")
     
-    # 캐시 설정
-    enable_cache: bool = Field(default=True, description="캐시 활성화")
-    cache_ttl_seconds: int = Field(default=300, description="캐시 TTL (초)")
+    # class Config:
+    #     # PostgreSQL 관련 환경변수도 자동으로 읽어옴
+    #     env_file = ".env"
+    #     env_file_encoding = "utf-8"
     
-    @property
-    def checkpoint_db_url(self) -> Optional[str]:
-        """체크포인터용 DB URL"""
-        return self.DATABASE_URL if self.enable_checkpointer else None
-    
-    @property
-    def is_development(self) -> bool:
-        """개발 환경 여부"""
-        return "localhost" in self.DATABASE_URL or "127.0.0.1" in self.DATABASE_URL
-    
-    # @property
-    # def sgis_configured(self) -> bool:
-    #     """SGIS API 설정 여부"""
+    # def has_sgis_config(self) -> bool:
+    #     """SGIS 설정이 모두 있는지 확인"""
     #     return bool(self.sgis_service_id and self.sgis_security_key)
+
+    # ✅ PostgresSaver URL을 DATABASE_URL과 동일하게 설정
+    @property 
+    def postgres_url(self) -> str:
+        """PostgresSaver용 DATABASE URL - DATABASE_URL과 동일하게 사용"""
+        return self.DATABASE_URL
 
 
 # 비동기 팩토리 함수
-async def create_agent_settings() -> AgentSettings:
-    """Agent 설정 생성 (비동기)"""
+async def get_agent_settings() -> AgentSettings:
+    """비동기 Agent 설정 반환"""
     return AgentSettings()
 
 
-# 전역 설정 (비동기 싱글톤)
-_settings: Optional[AgentSettings] = None
-
-
-async def get_agent_settings() -> AgentSettings:
-    """Agent 설정 반환 (비동기 싱글톤)"""
-    global _settings
-    if _settings is None:
-        _settings = await create_agent_settings()
-    return _settings
+# 동기 팩토리 함수 (호환성)
+def get_agent_settings_sync() -> AgentSettings:
+    """동기 Agent 설정 반환"""
+    return AgentSettings()

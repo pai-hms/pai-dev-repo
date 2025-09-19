@@ -10,19 +10,20 @@ from dataclasses import dataclass
 @dataclass
 class StatisticsData:
     """통계 데이터 도메인 모델"""
+    region_code: str
+    region_name: str 
     year: int
-    adm_cd: str
-    adm_nm: str
-    data: Dict[str, Any]
+    population: Optional[int] = None
+    data: Optional[Dict[str, Any]] = None
     source: str = "sgis"
     
     def validate(self) -> bool:
         """데이터 유효성 검증"""
         if not self.year or self.year < 2000:
             return False
-        if not self.adm_cd or len(self.adm_cd) < 2:
+        if not self.region_code or len(self.region_code) < 2:
             return False
-        if not self.adm_nm:
+        if not self.region_name:
             return False
         return True
 
@@ -30,10 +31,12 @@ class StatisticsData:
 @dataclass
 class QueryResult:
     """쿼리 결과 도메인 모델"""
+    success: bool
     data: List[Dict[str, Any]]
-    total_count: int
-    execution_time: float
-    query: str
+    row_count: int
+    error: Optional[str] = None
+    execution_time: Optional[float] = None
+    query: Optional[str] = None
     
     def is_empty(self) -> bool:
         """결과가 비어있는지 확인"""
@@ -42,8 +45,10 @@ class QueryResult:
     def get_summary(self) -> Dict[str, Any]:
         """결과 요약 정보"""
         return {
+            "success": self.success,
             "total_rows": len(self.data),
-            "total_count": self.total_count,
+            "row_count": self.row_count,
             "execution_time": self.execution_time,
-            "has_data": not self.is_empty()
+            "has_data": not self.is_empty(),
+            "error": self.error
         }
