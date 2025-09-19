@@ -29,7 +29,6 @@ async def create_initial_state(query: str, thread_id: str = "default") -> SQLAge
     messages = []
     
     try:
-        # ✅ PostgresSaver가 멀티턴 대화를 처리하므로 Session Service는 비활성화
         # 단순히 현재 질문만 추가
         messages.append(HumanMessage(content=query))
         logger.info(f"📚 PostgresSaver를 통한 멀티턴 대화 활성화 (thread_id: {thread_id})")
@@ -204,7 +203,6 @@ class SQLResponseNode:
             
             response = await llm_service.llm.ainvoke(messages)
             
-            # ✅ PostgresSaver가 자동으로 상태를 저장하므로 수동 저장 불필요
             logger.info(f"최종 응답 생성 완료: {len(response.content)} 글자")
             return {"messages": [response]}
             

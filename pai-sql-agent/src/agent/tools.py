@@ -34,7 +34,7 @@ async def sql_db_query(query: str) -> str:
     logger.info("=" * 80)
     
     try:
-        # ✅ Service Layer를 통한 접근 (데이터 주권 준수)
+        # ✅ Service Layer를 통한 접근
         db_service = await get_database_service()
         
         logger.info("🚀 SQL 쿼리 실행 시작...")

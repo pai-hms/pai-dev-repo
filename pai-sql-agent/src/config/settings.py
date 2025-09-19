@@ -1,6 +1,5 @@
 """
 애플리케이션 설정 관리
-환경 변수 및 설정값을 중앙 집중식으로 관리하는 모듈
 """
 from typing import Optional
 from pydantic import Field

@@ -1,6 +1,5 @@
 """
 SQL Agent 서비스 - Supervisor 패턴
-외부 세계와의 유일한 접점 (Façade)
 """
 import asyncio
 import logging
@@ -211,7 +210,6 @@ class SQLAgentService:
                     
                     yield result_chunk
                 
-                # PostgresSaver가 자동으로 상태를 저장하므로 수동 저장 불필요
                 logger.info(f"📝 PostgresSaver를 통해 대화 상태 자동 저장됨 (thread_id: {thread_id})")
             
             except Exception as stream_error:
