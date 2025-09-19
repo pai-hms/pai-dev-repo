@@ -33,22 +33,3 @@ async def get_service(service_name: str):
     """서비스 가져오기"""
     return getattr(container, service_name)()
 
-
-# ✅ 추가: 개별 서비스 팩토리 함수들
-async def get_database_service():
-    """데이터베이스 서비스 반환"""
-    from src.database.service import get_database_service
-    return await get_database_service()
-
-
-async def get_llm_service():
-    """LLM 서비스 반환"""
-    from src.llm.service import get_llm_service
-    return await get_llm_service()
-
-
-async def get_session_service():
-    """세션 서비스 반환"""
-    from src.session.service import get_session_service
-    return await get_session_service()
-

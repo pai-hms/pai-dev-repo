@@ -10,6 +10,7 @@ from datetime import datetime
 from .graph import create_sql_agent_graph
 from .nodes import create_initial_state
 from .container import get_container
+from src.session.service import get_session_service
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,7 @@ class SQLAgentService:
             # SQL Agent 그래프 생성
             self._agent_graph = await create_sql_agent_graph()
             
-            # 세션 서비스 초기화 (컨테이너에서 가져오기)
-            from .container import get_session_service
+            # 세션 서비스 초기화 - 직접 import 사용
             self._session_service = await get_session_service()  
             
             self._initialized = True

@@ -12,107 +12,105 @@ from psycopg_pool import AsyncConnectionPool
 from .nodes import SQLAgentState, SQLPromptNode, SQLAgentNode, SQLSummaryNode, SQLResponseNode
 from .settings import AgentSettings, get_agent_settings
 from .tools import AVAILABLE_TOOLS
+from src.llm.service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
 
-def create_checkpointer(settings: AgentSettings) -> Optional[AsyncPostgresSaver]:
-    """PostgreSQL checkpointer 생성"""
-    if not settings.enable_checkpointer:
-        return None
+async def create_sql_agent_graph() -> CompiledStateGraph:
+    """SQL Agent StateGraph 생성"""
     
-    try:
-        db_url = settings.DATABASE_URL
-        if db_url.startswith("postgres://"):
-            db_url = db_url.replace("postgres://", "postgresql://")
-        
-        pool = AsyncConnectionPool(db_url, min_size=1, max_size=10)
-        return AsyncPostgresSaver(pool)
-    except Exception as e:
-        logger.error(f"Checkpointer 생성 실패: {e}")
-        return None
-
-
-def create_sql_agent_workflow() -> StateGraph:
-    """SQL Agent 워크플로우 생성"""
+    logger.info("SQL Agent 그래프 생성 시작")
     
-    # 노드들 생성
-    prompt_node = SQLPromptNode()
-    summary_node = SQLSummaryNode()
-    response_node = SQLResponseNode()  # 새로 추가
-    tool_node = ToolNode(AVAILABLE_TOOLS)
+    # 설정 로드
+    settings = await get_agent_settings()
     
-    # 에이전트 노드
+    # 그래프 구성
+    workflow = StateGraph(SQLAgentState)
+    
+    # ================== 노드 정의 ==================
+    
+    # 1. 프롬프트 노드
+    workflow.add_node("prompt", SQLPromptNode())
+    
+    # 2. 에이전트 노드
     async def agent_node(state: SQLAgentState):
-        # ✅ 수정: 새로운 컨테이너 구조 사용
-        from .container import get_llm_service
         llm_service = await get_llm_service()
         
         sql_agent = SQLAgentNode(llm_service, AVAILABLE_TOOLS)
         return await sql_agent(state)
     
     # 개선된 라우팅 로직
-    def should_continue_after_tools(state: SQLAgentState) -> Literal["agent", "summary"]:
-        """도구 실행 후 다음 단계 결정"""
+    def should_continue(state: SQLAgentState) -> Literal["tools", "response"]:
+        """도구 사용 여부에 따른 라우팅"""
         messages = state.get("messages", [])
-        
-        # 마지막 도구 메시지 확인
-        for message in reversed(messages):
-            if hasattr(message, 'type') and message.type == "tool":
-                # 오류가 있으면 재시도
-                if message.content.startswith("Error"):
-                    logger.info("도구 실행 오류 감지 - Agent로 재시도")
-                    return "agent"
-                # 성공하면 요약으로
-                else:
-                    logger.info("도구 실행 성공 - Summary로 이동")
-                    return "summary"
-                break
-        
-        # 기본적으로 요약으로
-        return "summary"
-    
-    def should_continue_after_summary(state: SQLAgentState) -> Literal["response", "__end__"]:
-        """요약 후 응답 생성 여부 결정"""
-        # SQL과 데이터가 있으면 응답 생성
-        if state.get("sql_query") or state.get("data"):
-            logger.info("데이터 존재 - Response 생성")
+        if not messages:
             return "response"
-        else:
-            logger.info("데이터 없음 - 종료")
-            return "__end__"
+        
+        last_message = messages[-1]
+        
+        # 도구 호출이 있는 경우
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            return "tools"
+        
+        # 도구 호출이 없는 경우 바로 응답
+        return "response"
     
-    # 워크플로우 구성
-    workflow = StateGraph(SQLAgentState)
+    # 3. 도구 노드 (ToolNode 사용)
+    tool_node = ToolNode(AVAILABLE_TOOLS)
     
-    workflow.add_node("prompt", prompt_node)
+    # 4. 요약 노드
+    workflow.add_node("summary", SQLSummaryNode())
+    
+    # 5. 응답 노드
+    workflow.add_node("response", SQLResponseNode())
+    
+    # ================== 노드 등록 ==================
     workflow.add_node("agent", agent_node)
     workflow.add_node("tools", tool_node)
-    workflow.add_node("summary", summary_node)
-    workflow.add_node("response", response_node)  # 응답 생성 노드 추가
     
-    # 엣지 구성 - 개선된 플로우
+    # ================== 엣지 설정 ==================
+    
+    # 시작점
     workflow.add_edge(START, "prompt")
     workflow.add_edge("prompt", "agent")
-    workflow.add_edge("agent", "tools")
-    workflow.add_conditional_edges("tools", should_continue_after_tools)
-    workflow.add_conditional_edges("summary", should_continue_after_summary)
+    
+    # 조건부 엣지: agent -> tools 또는 response
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            "tools": "tools",
+            "response": "response"
+        }
+    )
+    
+    # 도구 실행 후 요약
+    workflow.add_edge("tools", "summary")
+    workflow.add_edge("summary", "response")
+    
+    # 응답 후 종료
     workflow.add_edge("response", END)
     
-    return workflow
-
-
-async def create_sql_agent_graph() -> CompiledStateGraph:
-    """SQL Agent 그래프 생성"""
+    # ================== 메모리 설정 ==================
+    checkpointer = None
     try:
-        settings = await get_agent_settings()
-        workflow = create_sql_agent_workflow()
-        checkpointer = create_checkpointer(settings)
-        
-        compiled_graph = workflow.compile(checkpointer=checkpointer)
-        logger.info("SQL Agent 그래프 생성 완료")
-        
-        return compiled_graph
+        if settings.enable_memory and settings.postgres_url:
+            # 비동기 PostgreSQL 연결 풀 생성
+            pool = AsyncConnectionPool(
+                conninfo=settings.postgres_url,
+                max_size=10,
+                check=AsyncConnectionPool.check_connection
+            )
+            checkpointer = AsyncPostgresSaver(pool)
+            logger.info("✅ PostgreSQL 메모리 활성화")
+        else:
+            logger.info("⚠️ 메모리 비활성화 (메모리 없이 실행)")
     except Exception as e:
-        logger.error(f"SQL Agent 그래프 생성 실패: {e}")
-        raise
+        logger.warning(f"메모리 설정 실패 (메모리 없이 계속): {e}")
+    
+    # ================== 그래프 컴파일 ==================
+    graph = workflow.compile(checkpointer=checkpointer)
+    
+    logger.info("SQL Agent 그래프 생성 완료")
+    return graph
