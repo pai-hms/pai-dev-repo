@@ -11,7 +11,6 @@ from langgraph.graph.message import add_messages
 
 from src.agent.prompt import DATABASE_SCHEMA_INFO
 from src.llm.service import get_llm_service
-from src.session.service import get_session_service
 
 logger = logging.getLogger(__name__)
 

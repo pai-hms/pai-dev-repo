@@ -11,7 +11,6 @@ from fastapi.responses import StreamingResponse
 
 from webapp.models import QueryRequest
 from src.agent.service import get_sql_agent_service
-from src.session.service import get_session_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -100,66 +99,3 @@ async def get_agent_status():
             "timestamp": time.time()
         }
 
-
-# ✅ 새로운 엔드포인트: 세션 관리
-@router.get("/sessions/{session_id}")
-async def get_session_info(session_id: str):
-    """세션 정보 조회"""
-    try:
-        session_service = await get_session_service()
-        
-        if session_service:
-            session = await session_service.get_session(session_id)
-            messages = await session_service.get_session_messages(session_id, limit=50)
-            
-            return {
-                "success": True,
-                "session_id": session_id,
-                "exists": session is not None,
-                "message_count": len(messages),
-                "messages": messages[-10:],  # 최근 10개만
-                "timestamp": time.time()
-            }
-        else:
-            return {
-                "success": False,
-                "error": "세션 서비스를 사용할 수 없습니다",
-                "timestamp": time.time()
-            }
-            
-    except Exception as e:
-        logger.error(f"세션 정보 조회 오류: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "timestamp": time.time()
-        }
-
-
-@router.delete("/sessions/{session_id}")
-async def clear_session(session_id: str):
-    """세션 대화 기록 삭제"""
-    try:
-        session_service = await get_session_service()
-        
-        if session_service:
-            success = await session_service.close_session(session_id)
-            return {
-                "success": success,
-                "message": "세션이 정리되었습니다" if success else "세션을 찾을 수 없습니다",
-                "timestamp": time.time()
-            }
-        else:
-            return {
-                "success": False,
-                "error": "세션 서비스를 사용할 수 없습니다",
-                "timestamp": time.time()
-            }
-            
-    except Exception as e:
-        logger.error(f"세션 삭제 오류: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "timestamp": time.time()
-        }

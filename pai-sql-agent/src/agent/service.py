@@ -8,7 +8,6 @@ from datetime import datetime
 
 from .graph import create_sql_agent_graph
 from .nodes import create_initial_state
-from .container import get_container
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +41,6 @@ class SQLAgentService:
         logger.info("SQL Agent 서비스 초기화 시작")
         
         try:
-            # DI 컨테이너 초기화
-            container = await get_container()
-            
             # SQL Agent 그래프 생성
             self._agent_graph = await create_sql_agent_graph()
             
