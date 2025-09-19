@@ -2,8 +2,10 @@
 데이터베이스 리포지토리
 통계청 및 SGIS API 데이터 저장을 위한 리포지토리 클래스들
 """
+import logging
 from typing import List, Optional, Dict, Any, Type, Union
 from datetime import datetime
+
 from sqlalchemy import select, insert, update, delete, text, desc, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +25,8 @@ from src.database.entities import (
     IndustryCodeStats,
     CrawlLog,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BaseRepository:
@@ -420,8 +424,8 @@ class CrawlLogRepository(BaseRepository):
         return list(result.scalars().all())
 
 
-class DatabaseService:
-    """데이터베이스 서비스 (Facade 패턴)"""
+class DatabaseRepository:
+    """데이터베이스 리포지토리 (Facade 패턴)"""
     
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -439,8 +443,6 @@ class DatabaseService:
     
     async def execute_raw_query(self, query: str) -> List[Dict[str, Any]]:
         """원시 SQL 쿼리 실행 - 에이전트 도구용"""
-        import logging
-        logger = logging.getLogger(__name__)
         
         try:
             # SQL 쿼리 실행

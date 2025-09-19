@@ -2,21 +2,21 @@
 통합 LLM 서비스 - 모든 LLM 관련 기능을 담당
 통계청 및 SGIS 데이터 분석용 LLM 모델 관리 서비스
 """
+import asyncio
 import logging
 from typing import Optional, Dict, Any, List, AsyncGenerator
 from dataclasses import dataclass
+
+from pydantic_settings import BaseSettings
+from pydantic import Field
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from src.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
-
-
-from pydantic_settings import BaseSettings
-from pydantic import Field
 
 
 class LLMConfig(BaseSettings):
@@ -28,9 +28,13 @@ class LLMConfig(BaseSettings):
     """
     
     # 모델 설정
+    provider: str = Field(
+        default="google",  # 기본: Google Gemini, 전환시: "openai"
+        description="LLM 프로바이더 (openai, google)"
+    )
     model_name: str = Field(
-        default="gpt-4o-mini",
-        description="사용할 LLM 모델명"
+        default="gemini-2.5-flash-lite",  # Google 기본값, OpenAI: "gpt-4o-mini"
+        description="사용할 LLM 모델명 (gemini-2.5-flash-lite, gpt-4o-mini)"
     )
     temperature: float = Field(
         default=0.1,
@@ -133,20 +137,56 @@ class LLMService:
     def _create_llm(self) -> BaseChatModel:
         """LLM 모델 생성"""
         try:
-            llm = ChatOpenAI(
-                model=self.config.model_name,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                streaming=self.config.streaming,
-                timeout=self.config.request_timeout,
-                max_retries=self.config.max_retries,
-                top_p=self.config.top_p,
-                frequency_penalty=self.config.frequency_penalty,
-                presence_penalty=self.config.presence_penalty,
-                openai_api_key=self.settings.openai_api_key,
-            )
+            # 빈 문자열이나 None인 경우 기본값으로 설정
+            provider = self.config.provider.lower().strip() if self.config.provider else "google"
+            model_name = self.config.model_name.strip() if self.config.model_name else "gemini-2.5-flash-lite"
             
-            logger.info(f"✅ LLM 모델 생성 완료: {self.config.model_name}")
+            logger.info(f"🔧 사용할 Provider: '{provider}', Model: '{model_name}'")
+            
+            if provider == "google":
+                # Google Gemini 모델 생성
+                llm = ChatGoogleGenerativeAI(
+                    model=model_name,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                    timeout=self.config.request_timeout,
+                    max_retries=self.config.max_retries,
+                    top_p=self.config.top_p,
+                    google_api_key=self.settings.google_api_key,
+                )
+                logger.info(f"🟢 Google Gemini 모델 생성: {model_name}")
+                
+            elif provider == "openai":
+                # OpenAI GPT 모델 생성
+                llm = ChatOpenAI(
+                    model=model_name,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                    streaming=self.config.streaming,
+                    timeout=self.config.request_timeout,
+                    max_retries=self.config.max_retries,
+                    top_p=self.config.top_p,
+                    frequency_penalty=self.config.frequency_penalty,
+                    presence_penalty=self.config.presence_penalty,
+                    openai_api_key=self.settings.openai_api_key,
+                )
+                logger.info(f"🟦 OpenAI GPT 모델 생성: {model_name}")
+                
+            else:
+                # 기본값으로 Google Gemini 사용
+                logger.warning(f"⚠️ 알 수 없는 프로바이더 '{provider}', Google Gemini로 기본 설정")
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-2.5-flash-lite",
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                    timeout=self.config.request_timeout,
+                    max_retries=self.config.max_retries,
+                    top_p=self.config.top_p,
+                    google_api_key=self.settings.google_api_key,
+                )
+                logger.info(f"🟢 기본 Google Gemini 모델 생성: gemini-2.5-flash-lite")
+            
+            logger.info(f"✅ LLM 모델 생성 완료: {provider}/{model_name}")
             return llm
             
         except Exception as e:
@@ -245,8 +285,6 @@ class LLMService:
             logger.error(f"❌ LLM 연결 테스트 실패: {e}")
             return False
 
-
-import asyncio
 
 # 글로벌 LLM 서비스 인스턴스 (싱글톤)
 _llm_service: Optional[LLMService] = None

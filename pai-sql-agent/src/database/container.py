@@ -7,7 +7,7 @@ import asyncio
 from dependency_injector import containers, providers
 
 from .connection import DatabaseManager, get_database_manager
-from .repository import DatabaseService as DatabaseRepository
+from .repository import DatabaseRepository
 from .service import DatabaseService
 
 logger = logging.getLogger(__name__)
@@ -22,16 +22,13 @@ class DatabaseContainer(containers.DeclarativeContainer):
     # ✅ 비동기 리소스 정의
     database_manager = providers.Resource(get_database_manager)
     
-    # Repository Layer - 비동기 세션 처리
-    database_repository = providers.Factory(
-        DatabaseRepository,
-        database_manager=database_manager
-    )
+    # Repository Layer - 세션 팩토리를 통한 생성
+    # 주의: DatabaseRepository는 실제로는 세션 컨텍스트에서 생성되어야 함
     
-    # Service Layer  
+    # Service Layer - DatabaseManager를 통한 생성
     database_service = providers.Factory(
         DatabaseService,
-        repository=database_repository
+        database_manager=database_manager
     )
 
 
@@ -95,10 +92,7 @@ async def get_database_manager_from_container() -> DatabaseManager:
     return container.database_manager()
 
 
-async def get_database_repository_from_container() -> DatabaseRepository:
-    """데이터베이스 Repository 반환 (비동기)"""
-    await initialize_container()
-    return container.database_repository()
+# DatabaseRepository는 세션 컨텍스트에서만 생성되므로 컨테이너에서 직접 제공하지 않음
 
 
 async def cleanup_container():

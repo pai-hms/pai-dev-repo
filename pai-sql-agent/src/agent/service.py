@@ -130,7 +130,6 @@ class SQLAgentService:
             chunk_count = 0
             token_count = 0
             
-            import asyncio
             
             # **🎯 UI 진행상황 모니터링 (추가 기능)**
             async def ui_progress_monitor():

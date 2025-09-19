@@ -5,7 +5,13 @@ SQL Agent 도구들 - LangChain Tools
 """
 import logging
 from typing import List, Dict, Any
+
 from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from src.agent.prompt import DATABASE_SCHEMA_INFO
+from src.database.service import get_database_service
+from src.llm.service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +35,6 @@ async def sql_db_query(query: str) -> str:
     
     try:
         # ✅ Service Layer를 통한 접근 (데이터 주권 준수)
-        from src.database.service import get_database_service
         db_service = await get_database_service()
         
         logger.info("🚀 SQL 쿼리 실행 시작...")
@@ -58,7 +63,6 @@ async def sql_db_query(query: str) -> str:
 def get_database_schema() -> str:
     """데이터베이스 스키마 정보 반환"""
     logger.info("📋 데이터베이스 스키마 정보 요청됨")
-    from src.agent.prompt import DATABASE_SCHEMA_INFO
     return DATABASE_SCHEMA_INFO
 
 
@@ -69,12 +73,7 @@ async def generate_sql_query(question: str) -> str:
         logger.info(f"🧠 SQL 생성 시작 - 질문: {question[:100]}...")
         
         # ✅ Service Layer를 통한 LLM 접근
-        from src.llm.service import get_llm_service
         llm_service = await get_llm_service()
-        
-        # 프롬프트 구성
-        from src.agent.prompt import DATABASE_SCHEMA_INFO
-        from langchain_core.messages import HumanMessage, SystemMessage
         
         messages = [
             SystemMessage(content=f"""당신은 한국 통계청 데이터 분석 전문가입니다.
@@ -251,7 +250,6 @@ class SQLExecutor:
                 }
             
             # Service Layer를 통한 실행
-            from src.database.service import get_database_service
             db_service = await get_database_service()
             
             result = await db_service.execute_safe_query(query)
@@ -279,8 +277,6 @@ class SQLGenerator:
     async def generate(self, question: str) -> str:
         """SQL 쿼리 생성"""
         try:
-            from langchain_core.messages import HumanMessage, SystemMessage
-            from src.agent.prompt import DATABASE_SCHEMA_INFO
             
             messages = [
                 SystemMessage(content=f"""한국 통계청 데이터베이스의 SQL 전문가입니다.

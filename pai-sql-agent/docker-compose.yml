@@ -23,6 +23,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-}
       - SGIS_SERVICE_ID=${SGIS_SERVICE_ID:-}
       - SGIS_SECURITY_KEY=${SGIS_SECURITY_KEY:-}
       - LOG_LEVEL=INFO
@@ -41,6 +44,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/pai_sql_agent
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-}
       - SGIS_SERVICE_ID=${SGIS_SERVICE_ID:-}
       - SGIS_SECURITY_KEY=${SGIS_SECURITY_KEY:-}
       - LOG_LEVEL=INFO

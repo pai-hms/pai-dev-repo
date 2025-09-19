@@ -4,9 +4,12 @@ SQL Agent 노드들 - 간소화된 버전
 import logging
 from typing import TypedDict, List, Annotated, Any
 from datetime import datetime
+
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import add_messages
+
+from src.agent.prompt import DATABASE_SCHEMA_INFO
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,6 @@ class SQLPromptNode:
         logger.info("📝 SQLPromptNode 실행 시작")
         logger.info(f"   입력 쿼리: '{state.get('query', '')}'")
         
-        from src.agent.prompt import DATABASE_SCHEMA_INFO
         
         system_prompt = f"""당신은 한국 통계청 데이터 전문 SQL 분석가입니다.
 

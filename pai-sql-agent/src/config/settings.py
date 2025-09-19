@@ -10,8 +10,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """애플리케이션 설정"""
     
-    # OpenAI 설정
-    openai_api_key: str = Field(description="OpenAI API 키")
+    # LLM API 설정
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API 키")
+    google_api_key: Optional[str] = Field(default=None, description="Google Gemini API 키")
 
     # 데이터베이스 설정
     database_url: str = Field(

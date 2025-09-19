@@ -69,6 +69,7 @@ class HealthResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     version: Optional[str] = None
     services: Dict[str, str] = Field(default_factory=dict)
+    database_connected: Optional[bool] = None
 
 
 # 추가된 모델들 (data.py에서 필요한 모델들)

@@ -4,8 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from webapp.models import HealthResponse
 from src.database.connection import get_async_session
-from src.database.repository import DatabaseService
-from src.crawler.sgis_client import SGISClient
+from src.database.repository import DatabaseRepository
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/data", tags=["data"])
@@ -18,36 +17,24 @@ async def health_check(session: AsyncSession = Depends(get_async_session)):
         # 데이터베이스 연결 확인
         db_connected = False
         try:
-            db_service = DatabaseService(session)
-            await db_service.execute_raw_query("SELECT 1")
+            db_repository = DatabaseRepository(session)
+            await db_repository.execute_raw_query("SELECT 1")
             db_connected = True
         except:
             pass
         
-        # SGIS API 연결 확인 (선택적 기능)
-        sgis_connected = False
-        try:
-            sgis_client = SGISClient()
-            # 간단한 연결 테스트
-            await sgis_client._get_access_token()
-            sgis_connected = True
-        except:
-            pass
-        
-        status = "healthy" if db_connected and sgis_connected else "degraded"
+        status = "healthy" if db_connected else "degraded"
         
         return HealthResponse(
             status=status,
-            database_connected=db_connected,
-            sgis_api_connected=sgis_connected
+            database_connected=db_connected
         )
         
     except Exception as e:
         logger.error(f"헬스체크 오류: {str(e)}")
         return HealthResponse(
             status="unhealthy",
-            database_connected=False,
-            sgis_api_connected=False
+            database_connected=False
         )
 
 
@@ -55,17 +42,17 @@ async def health_check(session: AsyncSession = Depends(get_async_session)):
 async def get_database_info(session: AsyncSession = Depends(get_async_session)):
     """데이터베이스 전체 정보 조회"""
     try:
-        db_service = DatabaseService(session)
+        db_repository = DatabaseRepository(session)
         
         # 테이블 목록과 레코드 수 조회
         tables_info = []
-        tables = await db_service.get_all_tables()
+        tables = await db_repository.get_all_tables()
         
         for table_name in tables:
             try:
                 # 레코드 수 조회
                 count_query = f"SELECT COUNT(*) as count FROM {table_name}"
-                count_result = await db_service.execute_raw_query(count_query)
+                count_result = await db_repository.execute_raw_query(count_query)
                 row_count = count_result[0]['count'] if count_result else 0
                 
                 tables_info.append({
@@ -89,7 +76,7 @@ async def get_database_info(session: AsyncSession = Depends(get_async_session)):
             ORDER BY population DESC 
             LIMIT 5
             """
-            sample_results = await db_service.execute_raw_query(sample_query)
+            sample_results = await db_repository.execute_raw_query(sample_query)
             
             if sample_results:
                 sample_data = "최신 인구 통계 (2023년):\n"
