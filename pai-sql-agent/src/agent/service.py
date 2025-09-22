@@ -142,14 +142,37 @@ class SQLAgentService:
             yield json.dumps(error_response.to_dict(), ensure_ascii=False) + '\n'
 
 
-# 직접 생성 방식으로 전역 변수 불필요
+# 싱글톤 인스턴스를 위한 전역 변수
+_sql_agent_service: Optional[SQLAgentService] = None
+_agent_lock = asyncio.Lock()
 
 
 async def get_sql_agent_service() -> SQLAgentService:
     """
-    SQL Agent 서비스 인스턴스 반환 - 직접 생성 방식
-    매번 새로운 인스턴스를 생성하여 순환 참조 완전 차단
+    SQL Agent 서비스 싱글톤 인스턴스 반환
+    스레드 안전한 지연 초기화로 성능 최적화
     """
-    # Container 없이 직접 워크플로우 생성
-    workflow = await create_sql_agent_graph()
-    return SQLAgentService(workflow)
+    global _sql_agent_service
+    
+    if _sql_agent_service is None:
+        async with _agent_lock:
+            # Double-checked locking pattern
+            if _sql_agent_service is None:
+                logger.info("SQLAgentService 싱글톤 인스턴스 생성 시작")
+                
+                # Container 없이 직접 워크플로우 생성
+                workflow = await create_sql_agent_graph()
+                _sql_agent_service = SQLAgentService(workflow)
+                
+                logger.info("SQLAgentService 싱글톤 인스턴스 생성 완료")
+    
+    return _sql_agent_service
+
+
+async def close_sql_agent_service():
+    """SQL Agent 서비스 싱글톤 정리"""
+    global _sql_agent_service
+    async with _agent_lock:
+        if _sql_agent_service is not None:
+            logger.info("SQLAgentService 싱글톤 인스턴스 정리")
+            _sql_agent_service = None

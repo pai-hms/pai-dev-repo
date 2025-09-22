@@ -2,6 +2,7 @@
 Database Service Layer - 독립적 서비스 (순환참조 제거)
 Repository 패턴 기반 데이터베이스 비즈니스 로직 처리
 """
+import asyncio
 import logging
 from typing import List, Dict, Any, Optional, Callable
 from contextlib import AbstractContextManager
@@ -133,23 +134,45 @@ class DatabaseService:
             return []
 
 
+# 싱글톤 인스턴스를 위한 전역 변수
+_database_service: Optional[DatabaseService] = None
+_database_lock = asyncio.Lock()
+
+
 # DI 기반 서비스 팩토리 함수들
 def create_database_service(session_factory: Callable[[], AbstractContextManager[AsyncSession]]) -> DatabaseService:
     """데이터베이스 서비스 팩토리 함수 (DI용)"""
     return DatabaseService(session_factory)
 
 
-# 직접 생성 함수 - Container 의존성 없음
+# 싱글톤 패턴으로 변경
 async def get_database_service() -> DatabaseService:
     """
-    데이터베이스 서비스 인스턴스 반환 - 직접 생성 방식
-    매번 새로운 인스턴스를 생성하여 순환 참조 완전 차단
+    데이터베이스 서비스 싱글톤 인스턴스 반환
+    스레드 안전한 지연 초기화로 성능 최적화
     """
-    settings = get_database_settings()
-    session_factory_instance = DatabaseSessionFactory(settings)
+    global _database_service
     
-    # 세션 팩토리 함수 생성
-    session_factory = session_factory_instance.get_session
+    if _database_service is None:
+        async with _database_lock:
+            # Double-checked locking pattern
+            if _database_service is None:
+                logger.info("DatabaseService 싱글톤 인스턴스 생성 시작")
+                
+                settings = get_database_settings()
+                session_factory_instance = DatabaseSessionFactory(settings)
+                session_factory = session_factory_instance.get_session
+                
+                _database_service = create_database_service(session_factory)
+                logger.info("DatabaseService 싱글톤 인스턴스 생성 완료")
     
-    # 매번 새로운 DatabaseService 인스턴스 생성
-    return create_database_service(session_factory)
+    return _database_service
+
+
+async def close_database_service():
+    """데이터베이스 서비스 싱글톤 정리"""
+    global _database_service
+    async with _database_lock:
+        if _database_service is not None:
+            logger.info("DatabaseService 싱글톤 인스턴스 정리")
+            _database_service = None

@@ -8,7 +8,8 @@ from fastapi.responses import JSONResponse
 from webapp.routers import agent, data
 from webapp.models import ErrorResponse
 from src.agent.settings import get_settings
-from src.database.service import get_database_service
+from src.database.service import get_database_service, close_database_service
+from src.agent.service import close_sql_agent_service
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -39,8 +40,14 @@ async def lifespan(app: FastAPI):
         logger.error(f"애플리케이션 시작 실패: {e}")
         raise
     finally:
-        # 종료 시
+        # 종료 시 - 싱글톤 서비스들 정리
         logger.info("애플리케이션 종료 시작")
+        try:
+            await close_sql_agent_service()
+            await close_database_service()
+            logger.info("싱글톤 서비스 정리 완료")
+        except Exception as e:
+            logger.warning(f"싱글톤 서비스 정리 중 오류: {e}")
         logger.info("애플리케이션 종료 완료")
 
 
