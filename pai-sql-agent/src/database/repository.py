@@ -1,6 +1,5 @@
 """
-Database Repository - SQL Agent 전용 단순화 버전
-Clean Architecture Infrastructure Layer
+Database Repository - SQL Agent
 """
 import logging
 from typing import List, Dict, Any

@@ -1,6 +1,5 @@
 """
 Database Settings - 데이터베이스 전용 설정
-기존 agent/settings.py에서 DB 관련 설정을 분리
 """
 from typing import Optional
 from pydantic import Field

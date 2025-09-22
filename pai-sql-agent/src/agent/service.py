@@ -1,5 +1,5 @@
 """
-SQL Agent 서비스 - 독립적 서비스 (순환참조 제거)
+SQL Agent 서비스
 """
 import asyncio
 import json
@@ -19,14 +19,13 @@ logger = logging.getLogger(__name__)
 
 class SQLAgentService:
     """
-    Application Layer - SQL Agent Service (독립적 서비스)
+    Application Layer - SQL Agent Service
     
     역할:
     - SQL Agent 비즈니스 로직 처리
     - 스트리밍 응답 관리
     - 워크플로우 실행 및 결과 변환
     
-    순환참조 제거된 독립적 서비스
     """
     
     def __init__(self, workflow: CompiledStateGraph):

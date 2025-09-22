@@ -1,6 +1,5 @@
 """
 Agent 도메인 객체 정의
-Pattern 규칙에 따른 팩토리 메서드 패턴 적용
 """
 import uuid
 from dataclasses import dataclass

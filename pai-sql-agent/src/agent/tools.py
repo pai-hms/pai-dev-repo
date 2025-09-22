@@ -1,7 +1,6 @@
 """
 SQL Agent 도구들 - LangChain Tools
 한국 통계청 데이터 분석을 위한 SQL 생성, 검증, 실행 도구들
-설계 원칙: Service Layer를 통한 데이터 접근 (데이터 주권 준수)
 """
 import logging
 from typing import List, Dict, Any
@@ -112,7 +111,7 @@ async def generate_sql_query(question: str) -> str:
 4. LIMIT 30으로 결과 제한
 5. 컬럼명은 스키마와 정확히 일치
 
-쿼리만 반환하고 다른 설명은 포함하지 마세요."""),
+쿼리만 반환하고 데이터에 대해 설명을 해주세요."""),
             HumanMessage(content=question)
         ]
         

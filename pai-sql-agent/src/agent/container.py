@@ -1,6 +1,6 @@
 """
-Agent Container - Application Layer (순환참조 제거)
-LangGraph 워크플로우 관리에 집중
+Agent Container - Application Layer
+LangGraph 워크플로우 관리
 """
 import logging
 from dependency_injector import containers, providers
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class AgentContainer(containers.DeclarativeContainer):
     """
-    Application Layer - Agent Container (순환참조 제거)
+    Application Layer - Agent Container
     
     역할:
     - LangGraph 워크플로우 관리

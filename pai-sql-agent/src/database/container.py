@@ -30,42 +30,6 @@ class DatabaseContainer(containers.DeclarativeContainer):
     )
 
 
-# 전역 컨테이너 인스턴스
-_database_container: DatabaseContainer = None
-
-
-async def get_database_container() -> DatabaseContainer:
-    """데이터베이스 컨테이너 인스턴스 반환 (비동기 초기화)"""
-    global _database_container
-    if _database_container is None:
-        _database_container = DatabaseContainer()
-        
-        # 리소스 초기화
-        try:
-            init_result = _database_container.init_resources()
-            if init_result is not None:
-                await init_result
-            logger.info("Database DI 컨테이너 생성 및 초기화 완료")
-        except Exception as e:
-            logger.error(f"Database 컨테이너 초기화 실패: {e}")
-            _database_container = None
-            raise
-    
-    return _database_container
-
-
-async def close_database_container():
-    """데이터베이스 컨테이너 정리"""
-    global _database_container
-    if _database_container is not None:
-        try:
-            # 리소스 정리 (세션 팩토리 등)
-            shutdown_result = _database_container.shutdown_resources()
-            if shutdown_result is not None:
-                await shutdown_result
-            logger.info("Database 컨테이너 리소스 정리 완료")
-        except Exception as e:
-            logger.warning(f"Database 컨테이너 정리 중 오류: {e}")
-        
-        _database_container = None
-        logger.info("Database DI 컨테이너 정리 완료")
+# ===== 파일 끝 =====
+# DatabaseContainer는 직접 사용하지 않고, 싱글톤 서비스 패턴 사용
+# get_database_service()를 통해 직접 접근
