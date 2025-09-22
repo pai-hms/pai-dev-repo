@@ -46,10 +46,25 @@ async def close_app_container():
     
     if _app_container is not None:
         try:
-            # 모든 리소스 정리
-            await _app_container.shutdown_resources()
+            # dependency-injector의 shutdown_resources 메서드 확인
+            if hasattr(_app_container, 'shutdown_resources'):
+                shutdown_method = getattr(_app_container, 'shutdown_resources')
+                
+                # 메서드 호출
+                shutdown_result = shutdown_method()
+                
+                # 결과가 None이 아니고 awaitable인 경우에만 await
+                if shutdown_result is not None and hasattr(shutdown_result, '__await__'):
+                    await shutdown_result
+                    logger.info("Application 컨테이너 비동기 리소스 정리 완료")
+                else:
+                    logger.info("Application 컨테이너 동기 리소스 정리 완료")
+            else:
+                logger.info("Application 컨테이너에 shutdown_resources 메서드 없음 - 수동 정리")
+            
         except Exception as e:
-            logger.error(f"Application 컨테이너 정리 실패: {e}")
+            logger.warning(f"Application 컨테이너 정리 중 오류 (무시): {e}")
+            # 오류가 발생해도 계속 진행
         
         _app_container = None
         logger.info("Application DI 컨테이너 정리 완료")

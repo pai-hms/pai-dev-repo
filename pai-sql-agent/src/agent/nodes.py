@@ -13,6 +13,7 @@ from src.agent.prompt import DATABASE_SCHEMA_INFO
 from src.agent.utils import trim_messages_by_tokens, count_messages_tokens
 from src.agent.settings import get_settings
 from src.llm.service import get_llm_service
+from src.agent.chain import create_sql_agent_chain, create_sql_response_chain
 
 logger = logging.getLogger(__name__)
 
@@ -79,71 +80,59 @@ class SQLPromptNode:
 
 
 class SQLAgentNode:
-    """SQL 에이전트 실행 노드"""
+    """SQL 에이전트 실행 노드 - Chain 기반"""
     
     def __init__(self, llm_service, tools):
         self.llm_service = llm_service
         self.tools = tools
+        self._chain = None
+    
+    def _get_chain(self, model_name: str = "gpt-4o-mini"):
+        """Chain을 지연 생성하여 반환"""
+        if self._chain is None:
+            logger.info("SQL Agent Chain 생성 중...")
+            self._chain = create_sql_agent_chain(
+                llm=self.llm_service.llm,
+                tools=self.tools,
+                model_name=model_name
+            )
+            logger.info("SQL Agent Chain 생성 완료")
+        return self._chain
     
     async def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
         try:
-            logger.info("SQLAgentNode 실행 시작")
+            logger.info("SQLAgentNode (Chain 기반) 실행 시작")
             logger.info(f"   사용 가능한 도구 수: {len(self.tools)}")
             logger.info(f"   도구 목록: {[tool.name for tool in self.tools]}")
             logger.info(f"   입력 메시지 수: {len(state.get('messages', []))}")
             
-            # 설정 로드
-            settings = get_settings()
-            
-            # 현재 사용 중인 모델 확인 (config에서 가져오거나 기본값 사용)
+            # 현재 사용 중인 모델 확인
             current_model = "gpt-4o-mini"  # 기본값
             if config and hasattr(config, 'configurable') and config.configurable:
                 current_model = config.configurable.get('model', current_model)
             
             logger.info(f"   사용 중인 모델: {current_model}")
             
-            # 메시지 트리밍 적용
-            original_messages = state.get("messages", [])
-            if original_messages:
-                # 현재 토큰 수 계산
-                current_tokens = count_messages_tokens(original_messages, current_model)
-                logger.info(f"   현재 메시지 토큰 수: {current_tokens}")
-                
-                # 토큰 수가 제한을 초과하는 경우 트리밍
-                if current_tokens > settings.TRIM_MAX_TOKENS:
-                    logger.info(f"   토큰 수 초과 ({current_tokens} > {settings.TRIM_MAX_TOKENS}), 메시지 트리밍 시작")
-                    trimmed_messages = trim_messages_by_tokens(
-                        messages=original_messages,
-                        max_tokens=settings.TRIM_MAX_TOKENS,
-                        model_name=current_model,
-                        strategy="last",  # 최신 메시지 우선 보존
-                        preserve_system=True  # 시스템 메시지 보존
-                    )
-                    
-                    # 상태 업데이트
-                    state = {**state, "messages": trimmed_messages}
-                    logger.info(f"   메시지 트리밍 완료: {len(original_messages)} → {len(trimmed_messages)} 메시지")
-                else:
-                    logger.info(f"   토큰 수 정상 범위 내 ({current_tokens} <= {settings.TRIM_MAX_TOKENS})")
-            
-            # 사용자 질문 추출 (시스템 메시지 제외)
+            # 사용자 질문 추출 (로깅용)
             user_question = "질문 없음"
             if state.get('messages'):
-                # 마지막 Human 메시지 찾기
                 for msg in reversed(state['messages']):
                     if hasattr(msg, 'content') and msg.__class__.__name__ == 'HumanMessage':
                         user_question = msg.content
                         break
                 logger.info(f"분석할 사용자 질문: '{user_question}'")
             
-            llm_with_tools = self.llm_service.llm.bind_tools(self.tools)
-            logger.info("LLM에 도구 바인딩 완료")
+            # Chain 실행
+            chain = self._get_chain(current_model)
+            logger.info("Chain 실행 시작...")
             
-            logger.info("LLM 추론 시작 - 질문 분석 및 도구 선택...")
-            message = await llm_with_tools.ainvoke(state["messages"])
-            logger.info(f"LLM 응답 수신: {type(message).__name__}")
+            # Chain에 메시지 전달
+            messages = state.get("messages", [])
+            message = await chain.ainvoke(messages, config=config or {})
             
-            # 도구 호출 분석
+            logger.info(f"Chain 응답 수신: {type(message).__name__}")
+            
+            # 도구 호출 분석 (기존 로직 유지)
             if hasattr(message, 'tool_calls') and message.tool_calls:
                 logger.info("=" * 60)
                 logger.info(f"도구 호출 결정! 총 {len(message.tool_calls)}개 도구 호출")
@@ -168,7 +157,7 @@ class SQLAgentNode:
             return {"messages": [message]}
             
         except Exception as e:
-            logger.error(f"SQL Agent 노드 오류: {e}", exc_info=True)
+            logger.error(f"SQL Agent 노드 (Chain) 오류: {e}", exc_info=True)
             error_message = AIMessage(content=f"처리 중 오류가 발생했습니다: {str(e)}")
             return {"messages": [error_message]}
 
@@ -197,52 +186,50 @@ class SQLSummaryNode:
 
 
 class SQLResponseNode:
-    """최종 응답 생성 노드"""
+    """최종 응답 생성 노드 - Chain 기반"""
     
     def __init__(self):
-        pass
+        self._chain = None
+    
+    async def _get_chain(self):
+        """Response Chain을 비동기로 생성하여 반환"""
+        if self._chain is None:
+            logger.info("SQL Response Chain 생성 중...")
+            llm_service = await get_llm_service()
+            self._chain = create_sql_response_chain(llm=llm_service.llm)
+            logger.info("SQL Response Chain 생성 완료")
+        return self._chain
     
     async def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
-        """SQL 결과를 바탕으로 사용자 친화적 응답 생성"""
+        """SQL 결과를 바탕으로 사용자 친화적 응답 생성 - Chain 사용"""
         try:
-            llm_service = await get_llm_service()
+            logger.info("SQLResponseNode (Chain 기반) 실행 시작")
             
             # 현재 상태에서 정보 추출
             query = state.get("query", "")
             sql_query = state.get("sql_query", "")
             data = state.get("data", "")
-        
             
-            # LLM을 사용해 최종 응답 생성
-            response_prompt = f"""다음 정보를 바탕으로 사용자에게 친화적이고 이해하기 쉬운 답변을 생성해주세요.
-
-사용자 질문: {query}
-
-실행된 SQL: {sql_query}
-
-쿼리 결과:
-{data}
-
-요구사항:
-1. 구체적인 숫자와 함께 명확한 답변 제공
-2. 필요시 추가 해석이나 인사이트 포함
-3. 한국어로 자연스럽게 작성
-4. 테이블 형태 데이터는 요약해서 설명
-
-답변:"""
-
-            messages = [
-                SystemMessage(content="당신은 데이터 분석 결과를 사용자에게 친화적으로 설명하는 전문가입니다."),
-                HumanMessage(content=response_prompt)
-            ]
+            logger.info(f"응답 생성 컨텍스트: query={len(query)}자, sql={len(sql_query)}자, data={len(data)}자")
             
-            response = await llm_service.llm.ainvoke(messages)
+            # Chain 가져오기 및 실행
+            chain = await self._get_chain()
+            logger.info("Response Chain 실행 시작...")
             
-            logger.info(f"최종 응답 생성 완료: {len(response.content)} 글자")
+            # Chain에 컨텍스트 데이터 전달
+            context_data = {
+                "query": query,
+                "sql_query": sql_query,
+                "data": data
+            }
+            
+            response = await chain.ainvoke(context_data, config=config or {})
+            
+            logger.info(f"Response Chain 응답 생성 완료: {len(response.content)} 글자")
             return {"messages": [response]}
             
         except Exception as e:
-            logger.error(f"응답 생성 오류: {e}")
+            logger.error(f"응답 생성 (Chain) 오류: {e}", exc_info=True)
             error_response = AIMessage(content=f"응답 생성 중 오류가 발생했습니다: {str(e)}")
             return {"messages": [error_response]}
 

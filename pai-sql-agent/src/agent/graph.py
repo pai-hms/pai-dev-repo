@@ -157,18 +157,21 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
             
             checkpointer = AsyncPostgresSaver(pool)
             
-            # setup() 시 인덱스 생성 오류 방지
+            # setup() 시 스키마 중복 생성 오류 방지
             try:
                 await checkpointer.setup()
                 logger.info("PostgresSaver 테이블 및 인덱스 설정 완료")
             except Exception as setup_error:
                 error_msg = str(setup_error).lower()
-                if ("transaction block" in error_msg or 
+                if ("already exists" in error_msg or 
+                    ("column" in error_msg and "already exists" in error_msg) or
+                    "task_path" in error_msg or
+                    "transaction block" in error_msg or 
                     "concurrently" in error_msg or
-                    "already exists" in error_msg or
                     "index" in error_msg):
-                    logger.warning("PostgresSaver 인덱스 생성 건너뜀 (기존 테이블 사용)")
-                    # 인덱스 오류는 무시하고 checkpointer 사용
+                    logger.warning(f"PostgresSaver 스키마 중복 오류 무시: {setup_error}")
+                    logger.info("기존 테이블/컬럼/인덱스 사용 - 정상 동작")
+                    # 스키마 중복 오류는 무시하고 checkpointer 사용
                 else:
                     logger.error(f"PostgresSaver setup 실패: {setup_error}")
                     # 연결 풀 정리 후 재시도
