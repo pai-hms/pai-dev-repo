@@ -12,17 +12,6 @@ class QueryRequest(BaseModel):
     request_type: Optional[str] = None  # 요청 분류 타입: sql, general, None=자동분류
 
 
-class QueryResponse(BaseModel):
-    success: bool
-    message: str
-    sql_queries: List[str] = []
-    query_results: List[Dict[str, Any]] = []
-    session_id: Optional[str] = None
-    thread_id: Optional[str] = None
-    processing_time: Optional[float] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
 class StreamChunk(BaseModel):
     """스트리밍 응답 청크"""
     type: str  # token, tool_start, tool_end, node_update, state_update, complete, error

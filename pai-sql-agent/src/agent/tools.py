@@ -346,8 +346,3 @@ TOOL_DESCRIPTIONS = {
     "validate_sql_query": "SQL 쿼리의 안전성과 유효성 검증"
 }
 
-
-def get_tool_by_name(tool_name: str):
-    """도구 이름으로 도구 인스턴스 반환"""
-    tool_map = {tool.name: tool for tool in AVAILABLE_TOOLS}
-    return tool_map.get(tool_name)

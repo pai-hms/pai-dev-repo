@@ -48,37 +48,6 @@ async def create_initial_state(query: str, thread_id: str = "default") -> SQLAge
     }
 
 
-
-
-class SQLPromptNode:
-    """SQL 프롬프트 생성 노드"""
-    
-    def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
-        logger.info("SQLPromptNode 실행 시작")
-        logger.info(f"   입력 쿼리: '{state.get('query', '')}'")
-        logger.info(f"   기존 메시지 수: {len(state.get('messages', []))}")
-        
-        # 시스템 프롬프트를 맨 앞에 추가
-        system_prompt = f"""당신은 데이터 전문 SQL 분석가입니다.
-
-데이터베이스 스키마:
-{DATABASE_SCHEMA_INFO}
-
-**응답 가이드라인:**
-1. 데이터 관련 질문: SQL 쿼리를 생성하고 sql_db_query 도구로 실행
-2. 인사말/간단한 질문: 친근하게 응답하고 도움이 필요한 경우 제안
-3. 모든 응답은 한국어로 작성
-
-이전 대화 맥락을 고려하여 연속적인 대화를 지원해주세요."""
-
-        # 기존 메시지에 시스템 프롬프트만 앞에 추가
-        messages = [SystemMessage(content=system_prompt)] + state.get("messages", [])
-        
-        logger.info(f"   최종 메시지 구성: System + {len(state.get('messages', []))}개 히스토리")
-        
-        return {"messages": messages}
-
-
 class SQLAgentNode:
     """SQL 에이전트 실행 노드 - Chain 기반"""
     
@@ -160,29 +129,6 @@ class SQLAgentNode:
             logger.error(f"SQL Agent 노드 (Chain) 오류: {e}", exc_info=True)
             error_message = AIMessage(content=f"처리 중 오류가 발생했습니다: {str(e)}")
             return {"messages": [error_message]}
-
-class SQLSummaryNode:
-    """SQL 결과 요약 노드"""
-    
-    def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
-        # 마지막 도구 호출 결과에서 SQL과 데이터 추출
-        sql_query = ""
-        data = ""
-        
-        for message in reversed(state["messages"]):
-            if hasattr(message, 'tool_calls') and message.tool_calls:
-                for tool_call in message.tool_calls:
-                    if tool_call["name"] == "sql_db_query":
-                        sql_query = tool_call["args"]["query"]
-                        break
-            elif hasattr(message, 'type') and message.type == "tool":
-                data = message.content
-                break
-        
-        return {
-            "sql_query": sql_query,
-            "data": data
-        }
 
 
 class SQLResponseNode:

@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
 from langchain_core.messages import SystemMessage
 
-from .nodes import SQLAgentState, SQLPromptNode, SQLAgentNode, SQLSummaryNode, SQLResponseNode
+from .nodes import SQLAgentState, SQLAgentNode, SQLResponseNode
 from .settings import AgentSettings, get_agent_settings
 from .tools import AVAILABLE_TOOLS
 from src.llm.service import get_llm_service
