@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .repository import DatabaseRepository
 from .domains import StatisticsData, QueryResult
-# Container import는 함수 내에서 지연 로딩
 
 logger = logging.getLogger(__name__)
 
@@ -138,10 +137,8 @@ def create_database_service(session_factory: Callable[[], AbstractContextManager
     return DatabaseService(session_factory)
 
 
-# DI 컨테이너 기반 서비스 팩토리
+# 하위 호환성을 위한 래퍼 함수
 async def get_database_service() -> DatabaseService:
-    """데이터베이스 서비스 인스턴스 반환 - DI 컨테이너 사용"""
-    from .container import get_database_container
-    
-    container = await get_database_container()
-    return container.database_service()
+    """데이터베이스 서비스 인스턴스 반환 - Factory 패턴 사용"""
+    from .factory import get_database_service as factory_get_service
+    return await factory_get_service()

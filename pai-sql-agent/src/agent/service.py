@@ -154,8 +154,8 @@ async def get_sql_agent_service() -> SQLAgentService:
     if _sql_agent_service is None:
         async with _service_lock:
             if _sql_agent_service is None:
-                from .container import get_agent_container
-                container = await get_agent_container()
-                _sql_agent_service = await container.get("agent_service")
+                # Container 없이 직접 워크플로우 생성
+                workflow = await create_sql_agent_graph()
+                _sql_agent_service = SQLAgentService(workflow)
     
     return _sql_agent_service

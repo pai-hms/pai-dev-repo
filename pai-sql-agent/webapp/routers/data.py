@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter
 
 from webapp.models import HealthResponse
-from src.database.service import get_database_service
+from src.database.factory import get_database_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/data", tags=["data"])

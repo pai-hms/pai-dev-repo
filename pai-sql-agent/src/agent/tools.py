@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.agent.prompt import DATABASE_SCHEMA_INFO
 from src.agent.utils import estimate_context_tokens, should_filter_context
 from src.agent.settings import get_settings
-# Database service는 런타임에 주입받음
+from src.database.factory import get_database_service
 from src.llm.service import get_llm_service
 from src.llm.settings import LLMSettings
 
@@ -37,8 +37,7 @@ async def sql_db_query(query: str) -> str:
     logger.info("=" * 80)
     
     try:
-        # Service Layer를 통한 접근 - 런타임 import로 순환 의존성 방지
-        from src.database.service import get_database_service
+        # Service Layer를 통한 접근
         db_service = await get_database_service()
         
         logger.info("SQL 쿼리 실행 시작...")

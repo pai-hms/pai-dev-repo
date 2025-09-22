@@ -10,8 +10,8 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from webapp.models import QueryRequest
-from webapp.container import get_app_container
 from src.agent.domain import QueryParam
+from src.agent.factory import get_agent_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -43,18 +43,9 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
             logger.info(f"SQL Agent 요청: {request.question[:50]}...")
             logger.info(f"세션 정보 - session_id: {session_id}, thread_id: {thread_id}")
             
-            # DI 컨테이너에서 SQL Agent 서비스 가져오기
-            logger.info("Application 컨테이너 가져오기 시작")
-            app_container = await get_app_container()
+            # Factory 패턴으로 Agent 서비스 가져오기
             logger.info("Agent 서비스 인스턴스 가져오기 시작")
-            
-            # Factory provider는 호출할 때마다 새 인스턴스를 생성
-            agent_service = app_container.agent.agent_service()
-            
-            # 만약 Future 객체라면 await 처리
-            if hasattr(agent_service, '__await__'):
-                agent_service = await agent_service
-                
+            agent_service = await get_agent_service()
             logger.info("Agent 서비스 인스턴스 가져오기 완료")
             
             # QueryParam 도메인 객체 생성
@@ -117,14 +108,9 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
 
 @router.get("/status")
 async def get_agent_status():
-    """Agent 상태 확인 - DI 패턴 적용"""
+    """Agent 상태 확인 - Factory 패턴 적용"""
     try:
-        app_container = await get_app_container()
-        agent_service = app_container.agent.agent_service()
-        
-        # 만약 Future 객체라면 await 처리
-        if hasattr(agent_service, '__await__'):
-            agent_service = await agent_service
+        agent_service = await get_agent_service()
         return {
             "success": True,
             "status": "active" if agent_service._initialized else "initializing",

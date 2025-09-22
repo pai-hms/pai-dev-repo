@@ -7,9 +7,8 @@ from fastapi.responses import JSONResponse
 
 from webapp.routers import agent, data
 from webapp.models import ErrorResponse
-from webapp.container import get_app_container, close_app_container
 from src.agent.settings import get_settings
-from src.database.service import get_database_service
+from src.database.factory import get_database_service
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -18,19 +17,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """애플리케이션 생명주기 관리 - 완전한 DI 기반"""
+    """애플리케이션 생명주기 관리 - Factory 패턴 기반"""
     # 시작 시
-    logger.info("애플리케이션 시작 (DI 기반)")
+    logger.info("애플리케이션 시작 (Factory 패턴 기반)")
     
     try:
-        # DI 컨테이너 초기화 (비동기)
-        app_container = await get_app_container()
-        logger.info("DI 컨테이너 초기화 완료")
-        
-        # 데이터베이스 테이블 생성 (DI 기반)
+        # 데이터베이스 연결 테스트
         try:
             db_service = await get_database_service()
-            # 데이터베이스 연결 테스트
             test_result = await db_service.execute_custom_query("SELECT 1 as test")
             if test_result.success:
                 logger.info("데이터베이스 연결 확인 완료")
@@ -38,9 +32,6 @@ async def lifespan(app: FastAPI):
                 logger.warning("데이터베이스 연결 테스트 실패")
         except Exception as e:
             logger.warning(f"데이터베이스 초기화 중 오류: {e}")
-        
-        # 애플리케이션에 컨테이너 바인딩
-        app.container = app_container
         
         yield
         
@@ -50,11 +41,6 @@ async def lifespan(app: FastAPI):
     finally:
         # 종료 시
         logger.info("애플리케이션 종료 시작")
-        try:
-            await close_app_container()
-            logger.info("DI 컨테이너 정리 완료")
-        except Exception as e:
-            logger.error(f"DI 컨테이너 정리 실패: {e}")
         logger.info("애플리케이션 종료 완료")
 
 
@@ -103,9 +89,9 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """헬스 체크 엔드포인트 - DI 기반"""
+    """헬스 체크 엔드포인트 - Factory 패턴 기반"""
     try:
-        # 데이터베이스 연결 테스트 (DI 기반)
+        # 데이터베이스 연결 테스트
         db_service = await get_database_service()
         test_result = await db_service.execute_custom_query("SELECT 1 as test")
         db_healthy = test_result.success
