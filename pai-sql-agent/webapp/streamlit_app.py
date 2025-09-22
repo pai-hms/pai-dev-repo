@@ -5,11 +5,10 @@ LangGraph의 실제 토큰 스트리밍을 활용한 개선된 UI
 import streamlit as st
 import requests
 import json
-import os
 import uuid
 import time
 from datetime import datetime
-from typing import Dict, Any, List, Generator
+from typing import Dict, Any, Generator
 
 # 페이지 설정 구성
 st.set_page_config(
@@ -53,8 +52,7 @@ def call_agent_stream(question: str) -> Generator[Dict[str, Any], None, None]:
         payload = {
             "question": question,
             "session_id": st.session_state.session_id,
-            "thread_id": st.session_state.session_id,  # ✅ thread_id로도 동일한 ID 사용
-            "stream_mode": "all"  # 모든 스트리밍 정보 포함
+            "thread_id": st.session_state.session_id  # 멀티턴 대화 지원
         }
         
         response = requests.post(url, json=payload, stream=True, timeout=30)
@@ -169,15 +167,12 @@ for message in st.session_state.messages:
                         status = "✅" if success else "❌"
                         st.write(f"{status} {i}. {tool_name}")
         
-        # 스트리밍 정보 표시 (있는 경우)
+        # 스트리밍 정보 표시 (간소화)
         if message["role"] == "assistant" and "streaming_info" in message:
             info = message["streaming_info"]
             with st.expander("📊 스트리밍 정보"):
                 st.write(f"🟢 토큰 수: {info.get('total_tokens', 0)}")
-                st.write(f"🔵 노드 실행: {info.get('nodes_executed', 0)}")
-                st.write(f"🟡 상태 업데이트: {info.get('state_updates', 0)}")
                 st.write(f"🟣 도구 실행: {info.get('tools_executed', 0)}")
-                st.write(f"⏱️ 응답 시간: {info.get('response_time', 0):.2f}초")
         
 
 # 사용자 입력
@@ -208,75 +203,47 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             used_tools = []
             streaming_info = {}
             
-            # 진행 단계 정의
-            progress_steps = {
-                "SQLAgentNode": 20,
-                "도구 실행": 40,
-                "실행 완료": 70,
-                "응답 생성": 90
-            }
-            
             with st.spinner("🤖 AI가 답변을 생성하는 중..."):
                 for chunk in call_agent_stream(prompt):
                     chunk_type = chunk.get("type", "unknown")
                     
+                    # AI 메시지 토큰 스트리밍
                     if chunk_type == "ai_message":
                         token_content = chunk.get("content", "")
                         full_response += token_content
                         response_container.write(full_response + "▌")
                     
-                    elif chunk_type == "progress":
-                        progress_content = chunk.get("content", "")
-                        current_time = datetime.now().strftime("%H:%M:%S")
-                        
-                        # Progress Bar 업데이트
-                        for key, progress_value in progress_steps.items():
-                            if key in progress_content and progress_value > current_progress:
-                                current_progress = progress_value
-                                progress_bar.progress(current_progress / 100)
-                                status_text.text(f"🔄 {progress_content}")
-                                break
-                        
-                        # 로그에만 추가 (중복 방지)
-                        if not log_content or log_content[-1] != progress_content:
-                            log_content.append(progress_content)
-                            log_text = "\n".join([f"[{current_time}] {msg}" for msg in log_content[-5:]])  # 최근 5개만
-                            log_container.text(log_text)
-                        
-                        # 중요한 단계에만 토스트
-                        if any(keyword in progress_content for keyword in ["시작", "완료"]):
-                            st.toast(progress_content, icon='🔄')
-                    
+                    # 도구 호출 시작
                     elif chunk_type == "tool_call":
-                        # 도구 사용 정보 수집
                         tool_info = {
                             "tool_name": chunk.get("content", chunk.get("tool_name", "Unknown")),
                             "success": chunk.get("success", True)
                         }
                         used_tools.append(tool_info)
                         
-                        # 도구 호출 진행 상황 표시
-                        progress_bar.progress(40)
+                        current_progress = 50
+                        progress_bar.progress(current_progress)
                         status_text.text(f"🔧 도구 실행 중: {tool_info['tool_name']}")
+                        
+                        # 로그 추가
+                        current_time = datetime.now().strftime("%H:%M:%S")
+                        log_content.append(f"도구 호출: {tool_info['tool_name']}")
+                        log_text = "\n".join([f"[{current_time}] {msg}" for msg in log_content[-3:]])
+                        log_container.text(log_text)
                     
+                    # 도구 실행 결과
                     elif chunk_type == "tool_result":
-                        # 도구 실행 결과 표시
-                        progress_bar.progress(70)
+                        current_progress = 90
+                        progress_bar.progress(current_progress)
                         status_text.text("📊 데이터 조회 완료")
+                        
+                        # 로그 추가
+                        current_time = datetime.now().strftime("%H:%M:%S")
+                        log_content.append("데이터 조회 완료")
+                        log_text = "\n".join([f"[{current_time}] {msg}" for msg in log_content[-3:]])
+                        log_container.text(log_text)
                     
-                    elif chunk_type == "complete" or chunk_type == "done":
-                        progress_bar.progress(100)
-                        status_text.text("완료!")
-                        # 스트리밍 정보 수집
-                        streaming_info = {
-                            "total_tokens": len(full_response.split()) if full_response else 0,
-                            "nodes_executed": 1,
-                            "state_updates": 1,
-                            "tools_executed": len(used_tools),
-                            "response_time": chunk.get("response_time", 0)
-                        }
-                        break
-                    
+                    # 에러 처리
                     elif chunk_type == "error":
                         st.error(f"오류: {chunk.get('content', 'Unknown error')}")
                         break
@@ -285,15 +252,23 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             if full_response:
                 response_container.write(full_response)
                 
-                # 성공적인 응답을 세션 상태에 저장
+                # 최종 진행률
+                progress_bar.progress(100)
+                status_text.text("✅ 완료!")
+                
+                # 성공적인 응답을 세션 상태에 저장 (간소화)
                 assistant_message = {
                     "role": "assistant",
                     "content": full_response,
                     "used_tools": used_tools,
-                    "streaming_info": streaming_info
+                    "streaming_info": {
+                        "tools_executed": len(used_tools),
+                        "total_tokens": len(full_response.split()) if full_response else 0
+                    }
                 }
                 st.session_state.messages.append(assistant_message)
                 
+                # UI 정리
                 time.sleep(1)
                 progress_bar.empty()
                 status_text.empty()
