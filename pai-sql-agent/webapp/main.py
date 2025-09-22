@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from webapp.routers import agent, data
 from webapp.models import ErrorResponse
-from src.config.settings import get_settings
+from src.agent.settings import get_settings
 from src.database.connection import get_database_manager
 
 # 로깅 설정
@@ -122,7 +122,7 @@ async def http_exception_handler(request, exc):
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """일반 예외 처리"""
-    logger.error(f"❌ 예상되지 않은 오류 발생: {str(exc)}")
+    logger.error(f"예상되지 않은 오류 발생: {str(exc)}")
     return JSONResponse(
         status_code=500,
         content=ErrorResponse(

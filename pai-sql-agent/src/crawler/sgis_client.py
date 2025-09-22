@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import httpx
-from src.config.settings import get_settings
+from src.agent.settings import get_settings
 
 
 class SGISDataType(Enum):

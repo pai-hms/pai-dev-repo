@@ -14,7 +14,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from src.config.settings import get_settings
+from src.agent.settings import get_settings
 
 logger = logging.getLogger(__name__)
 

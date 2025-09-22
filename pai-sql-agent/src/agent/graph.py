@@ -8,17 +8,19 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.prebuilt import ToolNode
 from psycopg_pool import AsyncConnectionPool
+from langchain_core.messages import SystemMessage
 
 from .nodes import SQLAgentState, SQLPromptNode, SQLAgentNode, SQLSummaryNode, SQLResponseNode
 from .settings import AgentSettings, get_agent_settings
 from .tools import AVAILABLE_TOOLS
 from src.llm.service import get_llm_service
+from src.agent.prompt import DATABASE_SCHEMA_INFO
 
 logger = logging.getLogger(__name__)
 
 
 async def create_sql_agent_graph() -> CompiledStateGraph:
-    """SQL Agent StateGraph 생성 - 표준 LangGraph 패턴 with 다단계 추론 지원"""
+    """SQL Agent StateGraph 생성"""
     
     logger.info("SQL Agent 그래프 생성 시작")
     
@@ -30,79 +32,85 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
     
     # ================== 노드 정의 ==================
     
-    # 1. 프롬프트 노드
-    workflow.add_node("prompt", SQLPromptNode())
-    
-    # 2. 에이전트 노드 (핵심 추론 엔진)
+    # 1. 에이전트 노드 (핵심 추론 엔진) - 시스템 프롬프트 포함
     async def agent_node(state: SQLAgentState):
+        # 시스템 프롬프트 자동 추가
+        if not state.get("messages") or not any(
+            msg.__class__.__name__ == "SystemMessage" for msg in state["messages"]
+        ):
+            system_prompt = f"""당신은 데이터 전문 SQL 분석가입니다.
+
+데이터베이스 스키마:
+{DATABASE_SCHEMA_INFO}
+
+**응답 가이드라인:**
+1. 데이터 관련 질문: SQL 쿼리를 생성하고 sql_db_query 도구로 실행
+2. 인사말/간단한 질문: 친근하게 응답하고 도움이 필요한 경우 제안
+3. 모든 응답은 한국어로 작성
+
+이전 대화 맥락을 고려하여 연속적인 대화를 지원해주세요."""
+            
+            messages = [SystemMessage(content=system_prompt)] + state.get("messages", [])
+            state = {**state, "messages": messages}
+        
         llm_service = await get_llm_service()
         sql_agent = SQLAgentNode(llm_service, AVAILABLE_TOOLS)
         return await sql_agent(state)
     
     workflow.add_node("agent", agent_node)
     
-    # 3. 도구 노드 (LangGraph 표준 ToolNode)
+    # 2. 도구 노드 (LangGraph 표준 ToolNode)
     tool_node = ToolNode(AVAILABLE_TOOLS)
     workflow.add_node("tools", tool_node)
     
-    # 4. 요약 노드 (최종 응답 직전에만 사용)
-    workflow.add_node("summary", SQLSummaryNode())
-    
-    # 5. 응답 노드 (최종 응답 생성)
-    workflow.add_node("response", SQLResponseNode())
-    
     # ================== 라우팅 로직 ==================
     
-    def should_continue_from_agent(state: SQLAgentState) -> Literal["tools", "summary"]:
-        """에이전트에서 도구 사용 여부 판단"""
+    def should_continue_from_agent(state: SQLAgentState) -> Literal["tools", "__end__"]:
+        """단순화된 Tool Condition: 도구 호출 여부만 판단"""
         messages = state.get("messages", [])
         if not messages:
-            return "summary"  # 메시지 없으면 바로 요약으로
+            logger.info("메시지 없음 - 종료")
+            return "__end__"
         
         last_message = messages[-1]
         
-        # 도구 호출이 있는 경우 → tools로 이동 (다단계 추론 지원)
+        # 도구 호출이 있는 경우 → tools로 이동
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            logger.info(f"도구 호출 감지: {len(last_message.tool_calls)}개 - 다단계 추론 지원")
+            logger.info(f"도구 호출 감지: {len(last_message.tool_calls)}개")
             return "tools"
         
-        # 도구 호출이 없는 경우 → summary로 이동 (최종 응답 준비)
-        logger.info("도구 호출 없음 - 최종 응답 준비")
-        return "summary"
+        # 도구 호출이 없는 경우 → 종료 (최종 응답)
+        logger.info("도구 호출 없음 - 최종 응답으로 종료")
+        return "__end__"
     
     def should_continue_from_tools(state: SQLAgentState) -> Literal["agent"]:
-        """도구 실행 후 항상 agent로 돌아가기 (다단계 추론 핵심)"""
-        logger.info("도구 실행 완료 - 에이전트로 돌아가서 추가 추론")
+        """도구 실행 후 항상 agent로 돌아가기"""
+        logger.info("도구 실행 완료 - 에이전트로 돌아가기")
         return "agent"
     
     # ================== 엣지 설정 ==================
     
-    # 시작 플로우
-    workflow.add_edge(START, "prompt")
-    workflow.add_edge("prompt", "agent")
+    # 단순화된 워크플로우: START → agent ↔ tools → END
+    workflow.add_edge(START, "agent")
     
-    # 표준 LangGraph 패턴: 에이전트가 도구 필요성 판단
+    # Agent에서 Tool Condition 판단
     workflow.add_conditional_edges(
         "agent",
         should_continue_from_agent,
         {
-            "tools": "tools",
-            "summary": "summary"  # 도구 불필요 시 바로 요약으로
+            "tools": "tools",      # 도구 호출 시
+            "__end__": END         # 도구 호출 없으면 종료
         }
     )
     
-    # 핵심 개선: 도구 실행 후 다시 에이전트로 (다단계 추론 지원)
+    # Tools에서 Agent로 루프백
     workflow.add_conditional_edges(
         "tools",
         should_continue_from_tools,
         {
-            "agent": "agent"  # 항상 에이전트로 돌아가서 추가 추론
+            "agent": "agent"       # 항상 에이전트로 돌아가기
         }
     )
-    
-    # 최종 단계: 요약 → 응답 → 종료
-    workflow.add_edge("summary", "response")
-    workflow.add_edge("response", END)
     
     # ================== 메모리 설정 ==================
     checkpointer = None
@@ -140,9 +148,10 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
     # ================== 그래프 컴파일 ==================
     graph = workflow.compile(checkpointer=checkpointer)
     
-    logger.info("SQL Agent 그래프 생성 완료 (다단계 추론 지원)")
+    logger.info("단순화된 SQL Agent 그래프 생성 완료")
+    logger.info(f"   - 워크플로우: START → agent ↔ tools → END")
     logger.info(f"   - 메모리: {'PostgreSQL' if checkpointer else '비활성화'}")
     logger.info(f"   - 사용 가능한 도구: {len(AVAILABLE_TOOLS)}개")
-    logger.info(f"   - 다단계 추론: agent, tools 루프 지원")
+    logger.info(f"   - Tool Calling: 단순 조건부 루프 방식")
     
     return graph
