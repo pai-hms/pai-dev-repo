@@ -30,6 +30,3 @@ class DatabaseContainer(containers.DeclarativeContainer):
     )
 
 
-# ===== 파일 끝 =====
-# DatabaseContainer는 직접 사용하지 않고, 싱글톤 서비스 패턴 사용
-# get_database_service()를 통해 직접 접근
