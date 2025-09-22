@@ -132,56 +132,63 @@ class SQLAgentService:
             
             # **단순화된 스트리밍 (중복 실행 방지)**
             async def merge_streams():
-                """단일 스트림으로 토큰 및 진행상황 모니터링"""
+                """실시간 토큰 스트리밍 - 모든 노드에서 즉시 전송"""
                 
-                # ✅ 하나의 스트림만 사용
-                token_stream = self._agent_graph.astream(
+                # ✅ 실시간 토큰 스트리밍을 위한 이벤트 스트림 사용
+                event_stream = self._agent_graph.astream_events(
                     initial_state,
                     config=config,
-                    stream_mode="messages"
+                    version="v1"
                 )
                 
                 try:
-                    # 메인 토큰 스트리밍
-                    async for chunk in token_stream:
+                    # 실시간 이벤트 스트리밍
+                    async for event in event_stream:
                         nonlocal chunk_count, token_count
                         chunk_count += 1
                         
-                        # 기존 토큰 스트리밍 로직 (변경 없음)
-                        if isinstance(chunk, tuple) and len(chunk) >= 1:
-                            message = chunk[0] if len(chunk) > 0 else None
-                            metadata = chunk[1] if len(chunk) > 1 else None
-                            
-                            if message and hasattr(message, 'content'):
-                                logger.info(f"   Content: '{message.content[:50]}...'")
-                            
-                            # response 노드에서만 토큰 스트리밍
-                            if (message and 
-                                hasattr(message, 'content') and 
-                                message.content and  
-                                message.content.strip() and
-                                metadata and
-                                metadata.get('langgraph_node') == 'response'):
-                                
+                        event_type = event.get("event", "")
+                        event_name = event.get("name", "")
+                        event_data = event.get("data", {})
+                        
+                        # 🚀 LLM 토큰 스트리밍 - 즉시 전송
+                        if event_type == "on_chat_model_stream":
+                            chunk_data = event_data.get("chunk", {})
+                            if hasattr(chunk_data, 'content') and chunk_data.content:
                                 token_count += 1
+                                logger.info(f"🔥 실시간 토큰: '{chunk_data.content}'")
                                 yield {
                                     "type": "token",
-                                    "content": message.content,
-                                    "timestamp": datetime.now().isoformat()
-                                }
-                            
-                            # 노드 업데이트
-                            elif metadata and metadata.get('langgraph_node'):
-                                node_name = metadata.get('langgraph_node')
-                                yield {
-                                    "type": "node_update",
-                                    "node": node_name,
-                                    "content": f"🔄 {node_name} 실행 중...",
+                                    "content": chunk_data.content,
                                     "timestamp": datetime.now().isoformat()
                                 }
                         
-                        else:
-                            logger.warning(f"⚠️ 예상치 못한 chunk 형태: {type(chunk)}")
+                        # 노드 시작/종료 이벤트
+                        elif event_type == "on_chain_start" and "Node" in event_name:
+                            node_name = event_name.replace("Node", "").lower()
+                            yield {
+                                "type": "node_update", 
+                                "node": node_name,
+                                "content": f"🔄 {node_name} 실행 중...",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                        
+                        # 도구 실행 이벤트
+                        elif event_type == "on_tool_start":
+                            yield {
+                                "type": "tool_start",
+                                "tool": event_name,
+                                "content": f"🔧 {event_name} 실행 중...",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                        
+                        elif event_type == "on_tool_end":
+                            yield {
+                                "type": "tool_end", 
+                                "tool": event_name,
+                                "content": f"✅ {event_name} 완료",
+                                "timestamp": datetime.now().isoformat()
+                            }
                     
                 except Exception as stream_error:
                     logger.error(f"스트리밍 처리 오류: {stream_error}")
