@@ -22,7 +22,7 @@ class SQLAgentService:
     def __init__(self, workflow: Optional[CompiledStateGraph] = None):
         """의존성 주입 생성자"""
         self._agent_graph = workflow
-        self._initialized = workflow is not None
+        self._initialized = False
     
     def set_workflow(self, workflow: CompiledStateGraph):
         """워크플로우 설정 (DI용)"""
@@ -37,13 +37,17 @@ class SQLAgentService:
         """스트리밍 쿼리 처리 - 도메인 객체 사용"""
         
         logger.info(f"스트리밍 쿼리 처리 시작: {question[:50]}...")
+        
+        # 워크플로우 지연 로딩
+        if not self._agent_graph:
+            logger.info("워크플로우 지연 로딩 시작")
+            from .graph import create_sql_agent_graph
+            self._agent_graph = await create_sql_agent_graph()
+            self._initialized = True
+            logger.info("워크플로우 지연 로딩 완료")
+        
         logger.info(f"서비스 초기화 상태: {self._initialized}")
         logger.info(f"워크플로우 존재 여부: {self._agent_graph is not None}")
-        
-        if not self._initialized or not self._agent_graph:
-            error_msg = f"서비스가 초기화되지 않았습니다 - initialized: {self._initialized}, graph: {self._agent_graph is not None}"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
         
         try:
             # 시작 신호

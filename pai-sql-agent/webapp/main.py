@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from webapp.routers import agent, data
 from webapp.models import ErrorResponse
+from webapp.container import get_app_container, close_app_container
 from src.agent.settings import get_settings
 from src.database.connection import get_database_manager
 
@@ -22,12 +23,17 @@ async def lifespan(app: FastAPI):
     logger.info("애플리케이션 시작")
     
     try:
+        # DI 컨테이너 초기화
+        app_container = get_app_container()
+        logger.info("DI 컨테이너 초기화 완료")
+        
         # 순서 중요: 데이터베이스 먼저 초기화
         db_manager = await get_database_manager()
         await db_manager.create_tables()
         logger.info("데이터베이스 테이블 생성 완료")
         
-        # 데이터베이스 초기화 완료
+        # 애플리케이션에 컨테이너 바인딩
+        app.container = app_container
         
         yield
         
@@ -36,7 +42,13 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # 종료 시
-        logger.info("애플리케이션 종료")
+        logger.info("애플리케이션 종료 시작")
+        try:
+            await close_app_container()
+            logger.info("DI 컨테이너 정리 완료")
+        except Exception as e:
+            logger.error(f"DI 컨테이너 정리 실패: {e}")
+        logger.info("애플리케이션 종료 완료")
 
 
 # FastAPI 애플리케이션 생성

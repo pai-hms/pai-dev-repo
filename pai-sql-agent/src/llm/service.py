@@ -114,16 +114,20 @@ class LLMService:
     - 에러 처리 및 재시도 로직
     """
     
-    def __init__(self, config: Optional[LLMConfig] = None):
+    def __init__(self, chat_model_provider=None, settings=None, config: Optional[LLMConfig] = None):
         """
-        LLM 서비스 초기화
+        LLM 서비스 초기화 - dependency-injector 호환
         
         Args:
+            chat_model_provider: 채팅 모델 프로바이더 (DI)
+            settings: 설정 객체 (DI)
             config: LLM 설정 (None이면 기본 설정 사용)
         """
         self.config = config or LLMConfig()
-        self.settings = get_settings()
+        self.settings = settings or get_settings()
+        self._chat_model_provider = chat_model_provider
         self._llm: Optional[BaseChatModel] = None
+        self._initialized = chat_model_provider is not None
         
         logger.info(f"LLM 서비스 초기화: {self.config.model_name}")
     
@@ -131,7 +135,15 @@ class LLMService:
     def llm(self) -> BaseChatModel:
         """LLM 모델 인스턴스 (지연 초기화)"""
         if self._llm is None:
-            self._llm = self._create_llm()
+            if self._chat_model_provider:
+                # DI를 통한 모델 생성
+                self._llm = self._chat_model_provider.get_chat_model(
+                    provider=self.config.provider,
+                    model_name=self.config.model_name
+                )
+            else:
+                # 기존 방식으로 모델 생성
+                self._llm = self._create_llm()
         return self._llm
     
     def _create_llm(self) -> BaseChatModel:
