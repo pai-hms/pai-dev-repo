@@ -13,7 +13,7 @@ from src.agent.prompt import DATABASE_SCHEMA_INFO
 from src.agent.utils import trim_messages_by_tokens, count_messages_tokens
 from src.agent.settings import get_settings
 from src.llm.service import get_llm_service
-from src.agent.chain import create_sql_agent_chain, create_sql_response_chain
+from src.agent.chain import create_sql_agent_chain
 
 logger = logging.getLogger(__name__)
 
@@ -129,53 +129,3 @@ class SQLAgentNode:
             logger.error(f"SQL Agent 노드 (Chain) 오류: {e}", exc_info=True)
             error_message = AIMessage(content=f"처리 중 오류가 발생했습니다: {str(e)}")
             return {"messages": [error_message]}
-
-
-class SQLResponseNode:
-    """최종 응답 생성 노드 - Chain 기반"""
-    
-    def __init__(self):
-        self._chain = None
-    
-    async def _get_chain(self):
-        """Response Chain을 비동기로 생성하여 반환"""
-        if self._chain is None:
-            logger.info("SQL Response Chain 생성 중...")
-            llm_service = await get_llm_service()
-            self._chain = create_sql_response_chain(llm=llm_service.llm)
-            logger.info("SQL Response Chain 생성 완료")
-        return self._chain
-    
-    async def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
-        """SQL 결과를 바탕으로 사용자 친화적 응답 생성 - Chain 사용"""
-        try:
-            logger.info("SQLResponseNode (Chain 기반) 실행 시작")
-            
-            # 현재 상태에서 정보 추출
-            query = state.get("query", "")
-            sql_query = state.get("sql_query", "")
-            data = state.get("data", "")
-            
-            logger.info(f"응답 생성 컨텍스트: query={len(query)}자, sql={len(sql_query)}자, data={len(data)}자")
-            
-            # Chain 가져오기 및 실행
-            chain = await self._get_chain()
-            logger.info("Response Chain 실행 시작...")
-            
-            # Chain에 컨텍스트 데이터 전달
-            context_data = {
-                "query": query,
-                "sql_query": sql_query,
-                "data": data
-            }
-            
-            response = await chain.ainvoke(context_data, config=config or {})
-            
-            logger.info(f"Response Chain 응답 생성 완료: {len(response.content)} 글자")
-            return {"messages": [response]}
-            
-        except Exception as e:
-            logger.error(f"응답 생성 (Chain) 오류: {e}", exc_info=True)
-            error_response = AIMessage(content=f"응답 생성 중 오류가 발생했습니다: {str(e)}")
-            return {"messages": [error_response]}
-

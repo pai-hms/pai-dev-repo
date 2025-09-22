@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class LLMConfig(BaseSettings):
     """
-    LLM 설정 (간소화) - 실제 사용되는 필드만 유지
+    LLM 설정
     """
     
     # 필수 설정
@@ -41,9 +41,6 @@ class LLMConfig(BaseSettings):
     class Config:
         env_prefix = "LLM_"
         case_sensitive = False
-
-
-# LLMResponse 클래스 제거됨 - 직접 LangChain 응답 사용
 
 
 class LLMService:
@@ -157,9 +154,6 @@ class LLMService:
             logger.error(f"LLM 응답 생성 실패: {e}")
             raise
     
-# 사용되지 않는 메서드들 제거됨 - 핵심 기능만 유지
-
-
 # 글로벌 LLM 서비스 인스턴스 (싱글톤)
 _llm_service: Optional[LLMService] = None
 _lock = asyncio.Lock()
