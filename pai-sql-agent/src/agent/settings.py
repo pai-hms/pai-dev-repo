@@ -67,30 +67,9 @@ class AgentSettings(BaseSettings):
         description="Prepared Statement 임계값 (0=비활성화)"
     )
     
-    # 에이전트 동작 설정
-    max_iterations: int = Field(default=3, description="최대 반복 횟수")
-    timeout_seconds: int = Field(default=30, description="타임아웃 시간 (초)")
-    max_result_rows: int = Field(default=50, description="최대 결과 행 수")
-    query_timeout: int = Field(default=10, description="쿼리 타임아웃 (초)")
-    
-    # 체크포인터 설정 (기존 유지)
-    enable_checkpointer: bool = Field(default=True, description="체크포인터 활성화")
-    
-    # 스트리밍 설정
-    streaming_enabled: bool = Field(default=True, description="스트리밍 활성화")
-    token_delay_ms: int = Field(default=50, description="토큰 간 지연시간 (밀리초)")
-    
     # 로깅 설정
     log_level: str = Field(default="INFO", description="로그 레벨")
     debug: bool = Field(default=False, description="디버그 모드")
-    
-    # API 설정 (통합)
-    api_timeout: int = Field(default=30, description="API 타임아웃 (초)")
-    max_retries: int = Field(default=3, description="최대 재시도 횟수")
-    
-    # SGIS API 설정 (선택적)
-    sgis_service_id: Optional[str] = Field(default=None, description="SGIS 서비스 ID")
-    sgis_security_key: Optional[str] = Field(default=None, description="SGIS 보안 키")
     
     # 환경변수 설정
     model_config = {
@@ -100,14 +79,7 @@ class AgentSettings(BaseSettings):
         "extra": "ignore"
     }
     
-    def has_sgis_config(self) -> bool:
-        """SGIS 설정이 모두 있는지 확인"""
-        return bool(self.sgis_service_id and self.sgis_security_key)
-    
-    @property
-    def sgis_configured(self) -> bool:
-        """SGIS API 설정 여부 확인 (호환성)"""
-        return self.has_sgis_config()
+    # SGIS 관련 메서드들 제거됨 (미사용)
 
     # PostgresSaver URL을 DATABASE_URL과 동일하게 설정
     @property 

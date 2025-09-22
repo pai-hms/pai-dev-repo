@@ -95,10 +95,8 @@ SQL_AGENT_SYSTEM_PROMPT = """
 {schema_info}
 
 **도구 사용 순서:**
-1. get_database_schema_info: 스키마 정보 확인
-2. generate_sql_query: SQL 쿼리 생성
-3. validate_sql_query: 쿼리 검증
-4. execute_sql_query: 쿼리 실행
+1. get_database_schema: 스키마 정보 확인
+2. sql_db_query: SQL 쿼리 실행
 
 항상 단계별로 작업하며, 각 단계의 결과를 확인한 후 다음 단계로 진행하세요.
 """
@@ -284,10 +282,8 @@ def get_enhanced_sql_agent_prompt() -> str:
 🔧 **사용 가능한 도구들**:
 - `analyze_data_question`: 질문 분석 및 계획 수립
 - `complete_sql_workflow`: 통합 SQL 분석 워크플로우  
-- `get_database_schema_info`: 스키마 정보 조회
-- `generate_sql_query`: SQL 쿼리 생성
-- `validate_sql_query`: SQL 검증
-- `execute_sql_query`: SQL 실행
+- `get_database_schema`: 스키마 정보 조회
+- `sql_db_query`: SQL 쿼리 실행
 
 ⚠️ **중요사항**:
 - 반드시 도구를 사용하여 정확한 데이터를 제공하세요

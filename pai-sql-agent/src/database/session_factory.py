@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine, 
     AsyncEngine, 
     AsyncSession,
-    async_scoped_session,
     async_sessionmaker
 )
 from sqlalchemy.pool import NullPool, StaticPool
@@ -31,7 +30,7 @@ class DatabaseSessionFactory:
         self.settings = settings
         self._engine: Optional[AsyncEngine] = None
         self._session_factory: Optional[async_sessionmaker] = None
-        self._scoped_session: Optional[async_scoped_session] = None
+        # _scoped_session 제거됨 (미사용)
         
     @property
     def engine(self) -> AsyncEngine:
@@ -80,15 +79,7 @@ class DatabaseSessionFactory:
             )
         return self._session_factory
     
-    @property
-    def scoped_session(self) -> async_scoped_session:
-        """스코프 세션 반환 (태스크별 격리)"""
-        if self._scoped_session is None:
-            self._scoped_session = async_scoped_session(
-                self.session_factory,
-                scopefunc=asyncio.current_task  # 태스크별 세션 스코프
-            )
-        return self._scoped_session
+    # scoped_session 제거됨 (미사용)
     
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -112,20 +103,7 @@ class DatabaseSessionFactory:
         finally:
             await session.close()
     
-    @asynccontextmanager
-    async def get_scoped_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """스코프 세션 컨텍스트 매니저"""
-        session: AsyncSession = self.scoped_session()
-        try:
-            yield session
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            logger.exception(f"스코프 세션 오류: {e}")
-            raise
-        finally:
-            await session.close()
-            await self.scoped_session.remove()
+    # get_scoped_session 제거됨 (미사용)
     
     async def create_tables(self):
         """데이터베이스 테이블 생성"""

@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .repository import DatabaseRepository
-from .domains import StatisticsData, QueryResult
+from .domains import QueryResult
 from .session_factory import DatabaseSessionFactory
 from .settings import get_database_settings
 
@@ -29,67 +29,8 @@ class DatabaseService:
         self.session_factory = session_factory
         logger.info("DatabaseService 초기화 완료 (독립적 서비스)")
     
-    async def get_population_by_region(self, region_name: str, year: int = 2023) -> Optional[StatisticsData]:
-        """지역별 인구 조회"""
-        try:
-            async with self.session_factory() as session:
-                # Repository가 데이터 제어권 담당
-                repository = DatabaseRepository(session)
-                
-                query = """
-                SELECT adm_cd, adm_nm, year, tot_ppltn as population
-                FROM population_stats 
-                WHERE adm_nm LIKE %s AND year = %s
-                ORDER BY tot_ppltn DESC
-                LIMIT 1
-                """
-                
-                results = await repository.execute_raw_query(query)
-                
-                if results:
-                    row = results[0]
-                    return StatisticsData(
-                        region_code=row['adm_cd'],
-                        region_name=row['adm_nm'],
-                        year=row['year'],
-                        population=row['population']
-                    )
-                return None
-                
-        except Exception as e:
-            logger.error(f"인구 조회 오류: {e}")
-            return None
-    
-    async def get_top_regions_by_population(self, year: int = 2023, limit: int = 10) -> List[StatisticsData]:
-        """인구 상위 지역 조회"""
-        try:
-            async with self.session_factory() as session:
-                # Repository가 데이터 제어권 담당
-                repository = DatabaseRepository(session)
-                
-                query = """
-                SELECT adm_cd, adm_nm, year, tot_ppltn as population
-                FROM population_stats 
-                WHERE year = %s AND tot_ppltn IS NOT NULL
-                ORDER BY tot_ppltn DESC
-                LIMIT %s
-                """
-                
-                results = await repository.execute_raw_query(query)
-                
-                return [
-                    StatisticsData(
-                        region_code=row['adm_cd'],
-                        region_name=row['adm_nm'],
-                        year=row['year'],
-                        population=row['population']
-                    )
-                    for row in results
-                ]
-                
-        except Exception as e:
-            logger.error(f"상위 지역 조회 오류: {e}")
-            return []
+    # get_population_by_region, get_top_regions_by_population 메서드들 제거됨
+    # 실제로는 execute_custom_query만 사용됨
     
     async def execute_custom_query(self, query: str) -> QueryResult:
         """사용자 정의 쿼리 실행"""

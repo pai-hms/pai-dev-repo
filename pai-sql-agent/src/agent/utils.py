@@ -111,14 +111,8 @@ class TokenCounter:
 _token_counter = TokenCounter()
 
 
-def count_tokens_approximately(text: str) -> int:
-    """근사 토큰 계산 (LangChain 호환)"""
-    return _token_counter._approximate_token_count(text)
-
-
-def count_message_tokens(message: BaseMessage, model_name: str = "gpt-4o-mini") -> int:
-    """메시지 토큰 수 계산"""
-    return _token_counter.count_message_tokens(message, model_name)
+# count_tokens_approximately와 count_message_tokens 제거됨
+# 직접 호출되지 않고 내부적으로만 사용되거나 완전 미사용
 
 
 def count_messages_tokens(messages: List[BaseMessage], model_name: str = "gpt-4o-mini") -> int:
@@ -179,7 +173,7 @@ def trim_messages_by_tokens(
     if strategy == "last":
         # 최신 메시지부터 역순으로 추가
         for msg in reversed(other_messages):
-            msg_tokens = count_message_tokens(msg, model_name)
+            msg_tokens = _token_counter.count_message_tokens(msg, model_name)
             if current_tokens + msg_tokens <= available_tokens:
                 trimmed_messages.insert(0, msg)
                 current_tokens += msg_tokens
@@ -188,7 +182,7 @@ def trim_messages_by_tokens(
     else:  # strategy == "first"
         # 오래된 메시지부터 순서대로 추가
         for msg in other_messages:
-            msg_tokens = count_message_tokens(msg, model_name)
+            msg_tokens = _token_counter.count_message_tokens(msg, model_name)
             if current_tokens + msg_tokens <= available_tokens:
                 trimmed_messages.append(msg)
                 current_tokens += msg_tokens

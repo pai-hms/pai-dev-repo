@@ -88,61 +88,8 @@ def get_database_schema() -> str:
     return DATABASE_SCHEMA_INFO
 
 
-@tool
-async def generate_sql_query(question: str) -> str:
-    """자연어 질문을 SQL 쿼리로 변환하는 도구"""
-    try:
-        logger.info(f"SQL 생성 시작 - 질문: {question[:100]}...")
-        
-        # Service Layer를 통한 LLM 접근
-        llm_service = await get_llm_service()
-        
-        messages = [
-            SystemMessage(content=f"""당신은 한국 통계청 데이터 분석 전문가입니다.
-
-데이터베이스 스키마:
-{DATABASE_SCHEMA_INFO}
-
-사용자 질문에 대해 적절한 PostgreSQL SELECT 쿼리를 생성해주세요.
-규칙:
-1. SELECT 문만 사용
-2. 적절한 WHERE 조건 추가  
-3. ORDER BY로 정렬 (중요도순)
-4. LIMIT 30으로 결과 제한
-5. 컬럼명은 스키마와 정확히 일치
-
-쿼리만 반환하고 데이터에 대해 설명을 해주세요."""),
-            HumanMessage(content=question)
-        ]
-        
-        # 수정: 기존 generate 메서드 사용
-        response = await llm_service.generate(messages)
-        
-        # SQL 부분만 추출
-        sql_query = extract_sql_from_response(response.content)
-        
-        logger.info(f"SQL 생성 완료: {sql_query[:100]}...")
-        return sql_query
-        
-    except Exception as e:
-        logger.error(f"SQL 생성 오류: {str(e)}")
-        return f"SELECT 'SQL 생성 중 오류 발생: {str(e)}' as error_message;"
-
-
-@tool
-def validate_sql_query(query: str) -> str:
-    """SQL 쿼리의 안전성을 검증하는 도구"""
-    try:
-        validator = SQLValidator()
-        is_valid, error_msg = validator.validate(query)
-        
-        if is_valid:
-            return f"SQL 검증 성공: {query}"
-        else:
-            return f"SQL 검증 실패: {error_msg}"
-            
-    except Exception as e:
-        return f"검증 오류: {str(e)}"
+# generate_sql_query와 validate_sql_query 도구 제거됨
+# 실제로는 sql_db_query만 주로 사용되며, SQL 생성은 Agent가 직접 처리
 
 
 def format_query_results(results: List[Dict[str, Any]]) -> str:
@@ -218,112 +165,9 @@ def extract_sql_from_response(response: str) -> str:
     return response.strip()
 
 
-# ===== 간소화된 유틸리티 클래스들 =====
-
-class SQLValidator:
-    """SQL 검증기 - 간소화된 버전"""
-    
-    DANGEROUS_KEYWORDS = [
-        'DROP', 'DELETE', 'UPDATE', 'INSERT', 'CREATE', 'ALTER', 
-        'TRUNCATE', 'REPLACE', 'MERGE', 'CALL', 'EXEC', 'EXECUTE',
-        'GRANT', 'REVOKE', 'COMMIT', 'ROLLBACK'
-    ]
-    
-    def validate(self, query: str) -> tuple[bool, str]:
-        """SQL 검증"""
-        if not query or not query.strip():
-            return False, "빈 쿼리입니다"
-        
-        query_upper = query.upper().strip()
-        
-        # SELECT로 시작하는지 확인
-        if not query_upper.startswith('SELECT'):
-            return False, "SELECT 문만 허용됩니다"
-        
-        # 위험한 키워드 확인
-        for keyword in self.DANGEROUS_KEYWORDS:
-            if keyword in query_upper:
-                return False, f"금지된 SQL 키워드: {keyword}"
-        
-        # 기본적인 문법 검사
-        if query.count('(') != query.count(')'):
-            return False, "괄호가 일치하지 않습니다"
-        
-        return True, ""
-
-
-class SQLExecutor:
-    """SQL 실행기 - 간소화된 버전"""
-    
-    def __init__(self, validator: SQLValidator, database_manager):
-        self.validator = validator
-        self.database_manager = database_manager
-    
-    async def execute(self, query: str) -> Dict[str, Any]:
-        """SQL 쿼리 실행"""
-        try:
-            # 검증
-            is_valid, error_msg = self.validator.validate(query)
-            if not is_valid:
-                return {
-                    "success": False,
-                    "result": f"쿼리 검증 실패: {error_msg}",
-                    "error": error_msg
-                }
-            
-            # Service Layer를 통한 실행
-            db_service = await get_database_service()
-            
-            result = await db_service.execute_custom_query(query)
-            
-            if not result.success:
-                return {
-                    "success": False,
-                    "result": f"쿼리 실행 실패: {result.error}",
-                    "error": result.error
-                }
-            
-            return {
-                "success": True,
-                "result": format_query_results(result.data),
-                "row_count": result.row_count
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "result": f"실행 오류: {str(e)}",
-                "error": str(e)
-            }
-
-
-class SQLGenerator:
-    """SQL 생성기 - 간소화된 버전"""
-    
-    def __init__(self, llm):
-        self.llm = llm
-    
-    async def generate(self, question: str) -> str:
-        """SQL 쿼리 생성"""
-        try:
-            
-            messages = [
-                SystemMessage(content=f"""한국 통계청 데이터베이스의 SQL 전문가입니다.
-
-데이터베이스 스키마:
-{DATABASE_SCHEMA_INFO}
-
-사용자 질문에 대해 적절한 PostgreSQL SELECT 쿼리를 생성해주세요.
-쿼리만 반환하고 다른 설명은 포함하지 마세요."""),
-                HumanMessage(content=question)
-            ]
-            
-            response = await self.llm.ainvoke(messages)
-            return extract_sql_from_response(response.content)
-            
-        except Exception as e:
-            logger.error(f"SQL 생성 오류: {e}")
-            return f"SELECT 'SQL 생성 실패: {str(e)}' as error;"
+# ===== 유틸리티 클래스들 제거됨 =====
+# SQLValidator, SQLExecutor, SQLGenerator는 실제로 사용되지 않음
+# sql_db_query 도구에서 직접 DatabaseService를 사용하는 방식으로 단순화
 
 
 # ===== 사용 가능한 도구 목록 =====
@@ -331,17 +175,9 @@ class SQLGenerator:
 AVAILABLE_TOOLS = [
     sql_db_query,           # SQL 실행
     get_database_schema,    # 스키마 정보
-    generate_sql_query,     # SQL 생성
-    validate_sql_query,     # SQL 검증
 ]
 
 
-# ===== 도구 설정 정보 =====
-
-TOOL_DESCRIPTIONS = {
-    "sql_db_query": "한국 통계청 데이터에서 SQL 쿼리를 안전하게 실행",
-    "get_database_schema": "사용 가능한 데이터베이스 테이블과 컬럼 정보 조회",
-    "generate_sql_query": "자연어 질문을 SQL 쿼리로 변환",
-    "validate_sql_query": "SQL 쿼리의 안전성과 유효성 검증"
-}
+# ===== 도구 설정 정보 (미사용으로 제거) =====
+# TOOL_DESCRIPTIONS는 실제로 어디서도 참조되지 않음
 
