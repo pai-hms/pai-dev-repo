@@ -1,29 +1,36 @@
 """
-Database Service Layer - Repository 중심 아키텍처
+Database Service Layer - 완전한 DI 기반 Repository 중심 아키텍처
 Repository가 데이터 제어권을 담당하며, Service는 비즈니스 로직만 처리
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
+from contextlib import AbstractContextManager
 from datetime import datetime
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .repository import DatabaseRepository
 from .domains import StatisticsData, QueryResult
-from .connection import get_database_manager
+# Container import는 함수 내에서 지연 로딩
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
-    """데이터베이스 서비스 - 비즈니스 로직 담당"""
+    """데이터베이스 서비스 - 완전한 DI 기반 비즈니스 로직 담당"""
     
-    def __init__(self, db_manager):
-        self.db_manager = db_manager
-        logger.info("DatabaseService 초기화 완료")
+    def __init__(self, session_factory: Callable[[], AbstractContextManager[AsyncSession]]):
+        """
+        Args:
+            session_factory: 세션 팩토리 함수 (DI로 주입됨)
+        """
+        self.session_factory = session_factory
+        logger.info("DatabaseService 초기화 완료 (완전한 DI 기반)")
     
     async def get_population_by_region(self, region_name: str, year: int = 2023) -> Optional[StatisticsData]:
         """지역별 인구 조회"""
         try:
-            async with self.db_manager.get_async_session() as session:
+            async with self.session_factory() as session:
                 # Repository가 데이터 제어권 담당
                 repository = DatabaseRepository(session)
                 
@@ -54,7 +61,7 @@ class DatabaseService:
     async def get_top_regions_by_population(self, year: int = 2023, limit: int = 10) -> List[StatisticsData]:
         """인구 상위 지역 조회"""
         try:
-            async with self.db_manager.get_async_session() as session:
+            async with self.session_factory() as session:
                 # Repository가 데이터 제어권 담당
                 repository = DatabaseRepository(session)
                 
@@ -87,7 +94,7 @@ class DatabaseService:
         start_time = datetime.now()
         
         try:
-            async with self.db_manager.get_async_session() as session:
+            async with self.session_factory() as session:
                 # Repository가 데이터 제어권 담당
                 repository = DatabaseRepository(session)
                 results = await repository.execute_raw_query(query)
@@ -117,7 +124,7 @@ class DatabaseService:
     async def get_all_tables(self) -> List[str]:
         """모든 테이블 목록 조회 - Repository에 위임"""
         try:
-            async with self.db_manager.get_async_session() as session:
+            async with self.session_factory() as session:
                 repository = DatabaseRepository(session)
                 return await repository.get_all_tables()
         except Exception as e:
@@ -125,23 +132,16 @@ class DatabaseService:
             return []
 
 
-# 전역 싱글톤 인스턴스
-_database_service: Optional[DatabaseService] = None
+# DI 기반 서비스 팩토리 함수들
+def create_database_service(session_factory: Callable[[], AbstractContextManager[AsyncSession]]) -> DatabaseService:
+    """데이터베이스 서비스 팩토리 함수 (DI용)"""
+    return DatabaseService(session_factory)
 
 
+# DI 컨테이너 기반 서비스 팩토리
 async def get_database_service() -> DatabaseService:
-    """데이터베이스 서비스 인스턴스 반환 - Repository 중심, Container 의존성 제거"""
-    global _database_service
+    """데이터베이스 서비스 인스턴스 반환 - DI 컨테이너 사용"""
+    from .container import get_database_container
     
-    if _database_service is None:
-        # Container 의존성 제거 - 직접 DatabaseManager 사용
-        db_manager = await get_database_manager()
-        _database_service = DatabaseService(db_manager)
-    
-    return _database_service
-
-
-async def reset_database_service():
-    """데이터베이스 서비스 리셋 (개발/테스트용)"""
-    global _database_service
-    _database_service = None
+    container = await get_database_container()
+    return container.database_service()

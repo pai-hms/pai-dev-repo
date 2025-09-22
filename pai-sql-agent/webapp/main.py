@@ -9,7 +9,7 @@ from webapp.routers import agent, data
 from webapp.models import ErrorResponse
 from webapp.container import get_app_container, close_app_container
 from src.agent.settings import get_settings
-from src.database.connection import get_database_manager
+from src.database.service import get_database_service
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -18,19 +18,26 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """애플리케이션 생명주기 관리"""
+    """애플리케이션 생명주기 관리 - 완전한 DI 기반"""
     # 시작 시
-    logger.info("애플리케이션 시작")
+    logger.info("애플리케이션 시작 (DI 기반)")
     
     try:
-        # DI 컨테이너 초기화
-        app_container = get_app_container()
+        # DI 컨테이너 초기화 (비동기)
+        app_container = await get_app_container()
         logger.info("DI 컨테이너 초기화 완료")
         
-        # 순서 중요: 데이터베이스 먼저 초기화
-        db_manager = await get_database_manager()
-        await db_manager.create_tables()
-        logger.info("데이터베이스 테이블 생성 완료")
+        # 데이터베이스 테이블 생성 (DI 기반)
+        try:
+            db_service = await get_database_service()
+            # 데이터베이스 연결 테스트
+            test_result = await db_service.execute_custom_query("SELECT 1 as test")
+            if test_result.success:
+                logger.info("데이터베이스 연결 확인 완료")
+            else:
+                logger.warning("데이터베이스 연결 테스트 실패")
+        except Exception as e:
+            logger.warning(f"데이터베이스 초기화 중 오류: {e}")
         
         # 애플리케이션에 컨테이너 바인딩
         app.container = app_container
@@ -96,11 +103,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """헬스 체크 엔드포인트"""
+    """헬스 체크 엔드포인트 - DI 기반"""
     try:
-        # 데이터베이스 연결 테스트
-        db_manager = await get_database_manager()  # await 추가
-        db_healthy = await db_manager.test_connection()
+        # 데이터베이스 연결 테스트 (DI 기반)
+        db_service = await get_database_service()
+        test_result = await db_service.execute_custom_query("SELECT 1 as test")
+        db_healthy = test_result.success
         
         return {
             "status": "healthy" if db_healthy else "unhealthy",

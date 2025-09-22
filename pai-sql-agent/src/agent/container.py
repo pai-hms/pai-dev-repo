@@ -1,5 +1,6 @@
 """
-Agent 모듈용 의존성 주입 컨테이너 - dependency-injector 사용
+Agent Container - Application Layer
+Clean Architecture 기반 비즈니스 로직 계층
 """
 import logging
 from dependency_injector import containers, providers
@@ -13,29 +14,36 @@ logger = logging.getLogger(__name__)
 
 
 class AgentContainer(containers.DeclarativeContainer):
-    """Agent 모듈용 의존성 주입 컨테이너"""
+    """
+    Application Layer - Agent Container
     
-    # Configuration
+    역할:
+    - SQL Agent 비즈니스 로직 조합
+    - LangGraph 워크플로우 관리
+    - 도구(Tools) 및 서비스 통합
+    
+    의존성: Infrastructure Layer (LLM)
+    """
+    
+    # Configuration Layer
     config = providers.Configuration()
     
-    # External containers
-    llm = providers.Container(LLMContainer)
+    # External Infrastructure Dependencies
+    llm_container = providers.Container(LLMContainer)
     
-    # Settings
+    # Domain Layer - Settings & Tools
     settings = providers.Singleton(get_settings)
-    
-    # Tools
     tools = providers.Object(AVAILABLE_TOOLS)
     
-    # Workflow (Resource for lifecycle management)
+    # Infrastructure Layer - LangGraph Workflow
     workflow = providers.Resource(
-        create_sql_agent_graph,
-        # 필요한 의존성들을 여기에 주입할 수 있음
+        create_sql_agent_graph
     )
     
-    # Agent Service (Factory로 변경하여 매번 새로운 인스턴스 생성)
+    # Application Layer - Agent Service (비즈니스 로직 집중점)
     agent_service = providers.Factory(
-        SQLAgentService
+        SQLAgentService,
+        workflow=workflow
     )
 
 

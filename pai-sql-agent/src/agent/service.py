@@ -18,17 +18,27 @@ logger = logging.getLogger(__name__)
 
 
 class SQLAgentService:
-    """SQL Agent 서비스 - DI 패턴 적용"""
+    """
+    Application Layer - SQL Agent Service
     
-    def __init__(self, workflow: Optional[CompiledStateGraph] = None):
-        """의존성 주입 생성자"""
-        self._agent_graph = workflow
-        self._initialized = False
+    역할:
+    - SQL Agent 비즈니스 로직 처리
+    - 스트리밍 응답 관리
+    - 워크플로우 실행 및 결과 변환
     
-    def set_workflow(self, workflow: CompiledStateGraph):
-        """워크플로우 설정 (DI용)"""
+    Clean Architecture의 Application Layer 핵심 서비스
+    """
+    
+    def __init__(self, workflow: CompiledStateGraph):
+        """
+        의존성 주입 생성자
+        
+        Args:
+            workflow: LangGraph 워크플로우 (Infrastructure Layer에서 주입)
+        """
         self._agent_graph = workflow
         self._initialized = True
+        logger.info("SQLAgentService 초기화 완료 - DI 기반")
     
     async def process_query_stream(
         self,
@@ -38,16 +48,12 @@ class SQLAgentService:
         """스트리밍 쿼리 처리 - 도메인 객체 사용"""
         
         logger.info(f"스트리밍 쿼리 처리 시작: {question[:50]}...")
-        
-        # 워크플로우 지연 로딩
-        if not self._agent_graph:
-            logger.info("워크플로우 지연 로딩 시작")
-            self._agent_graph = await create_sql_agent_graph()
-            self._initialized = True
-            logger.info("워크플로우 지연 로딩 완료")
-        
         logger.info(f"서비스 초기화 상태: {self._initialized}")
         logger.info(f"워크플로우 존재 여부: {self._agent_graph is not None}")
+        
+        # 워크플로우 검증
+        if not self._agent_graph:
+            raise ValueError("워크플로우가 주입되지 않았습니다. DI 설정을 확인하세요.")
         
         try:
             # 시작 신호

@@ -45,7 +45,7 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
             
             # DI 컨테이너에서 SQL Agent 서비스 가져오기
             logger.info("Application 컨테이너 가져오기 시작")
-            app_container = get_app_container()
+            app_container = await get_app_container()
             logger.info("Agent 서비스 인스턴스 가져오기 시작")
             
             # Factory provider는 호출할 때마다 새 인스턴스를 생성
@@ -119,7 +119,7 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
 async def get_agent_status():
     """Agent 상태 확인 - DI 패턴 적용"""
     try:
-        app_container = get_app_container()
+        app_container = await get_app_container()
         agent_service = app_container.agent.agent_service()
         
         # 만약 Future 객체라면 await 처리

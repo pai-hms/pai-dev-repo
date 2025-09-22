@@ -1,27 +1,27 @@
 import logging
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter
 
 from webapp.models import HealthResponse
-from src.database.connection import get_async_session
-from src.database.repository import DatabaseRepository
+from src.database.service import get_database_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/data", tags=["data"])
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check(session: AsyncSession = Depends(get_async_session)):
-    """서비스 상태 확인"""
+async def health_check():
+    """서비스 상태 확인 - DI 기반"""
     try:
         # 데이터베이스 연결 확인
         db_connected = False
         try:
-            db_repository = DatabaseRepository(session)
-            await db_repository.execute_raw_query("SELECT 1")
-            db_connected = True
-        except:
-            pass
+            db_service = await get_database_service()
+            # 간단한 쿼리로 연결 확인
+            result = await db_service.execute_custom_query("SELECT 1 as test")
+            db_connected = result.success
+        except Exception as e:
+            logger.warning(f"데이터베이스 연결 확인 실패: {e}")
+            db_connected = False
         
         status = "healthy" if db_connected else "degraded"
         
@@ -39,21 +39,21 @@ async def health_check(session: AsyncSession = Depends(get_async_session)):
 
 
 @router.get("/database-info")
-async def get_database_info(session: AsyncSession = Depends(get_async_session)):
-    """데이터베이스 전체 정보 조회"""
+async def get_database_info():
+    """데이터베이스 전체 정보 조회 - DI 기반"""
     try:
-        db_repository = DatabaseRepository(session)
+        db_service = await get_database_service()
         
         # 테이블 목록과 레코드 수 조회
         tables_info = []
-        tables = await db_repository.get_all_tables()
+        tables = await db_service.get_all_tables()
         
         for table_name in tables:
             try:
                 # 레코드 수 조회
                 count_query = f"SELECT COUNT(*) as count FROM {table_name}"
-                count_result = await db_repository.execute_raw_query(count_query)
-                row_count = count_result[0]['count'] if count_result else 0
+                count_result = await db_service.execute_custom_query(count_query)
+                row_count = count_result.data[0]['count'] if count_result.success and count_result.data else 0
                 
                 tables_info.append({
                     "table_name": table_name,
@@ -70,17 +70,17 @@ async def get_database_info(session: AsyncSession = Depends(get_async_session)):
         sample_data = ""
         try:
             sample_query = """
-            SELECT adm_cd, adm_nm, year, population 
+            SELECT adm_cd, adm_nm, year, tot_ppltn as population 
             FROM population_stats 
             WHERE year = 2023 
-            ORDER BY population DESC 
+            ORDER BY tot_ppltn DESC 
             LIMIT 5
             """
-            sample_results = await db_repository.execute_raw_query(sample_query)
+            sample_result = await db_service.execute_custom_query(sample_query)
             
-            if sample_results:
+            if sample_result.success and sample_result.data:
                 sample_data = "최신 인구 통계 (2023년):\n"
-                for row in sample_results:
+                for row in sample_result.data:
                     sample_data += f"- {row['adm_nm']}: {row['population']:,}명\n"
         except Exception as e:
             logger.warning(f"샘플 데이터 조회 실패: {e}")
