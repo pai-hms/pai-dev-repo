@@ -1,6 +1,6 @@
 """
-Application Container - Clean Architecture 최상위 조합자
-계층적 의존성 주입을 통한 전체 시스템 구성
+Application Container - 간결화된 최상위 조합자 (순환참조 제거)
+Infrastructure Layer 중심 구성
 """
 import logging
 from dependency_injector import containers, providers
@@ -13,29 +13,23 @@ logger = logging.getLogger(__name__)
 
 class ApplicationContainer(containers.DeclarativeContainer):
     """
-    Clean Architecture - Application Container (최상위 조합자)
+    Clean Architecture - Application Container (간결화)
     
-    레이어 구조:
-    1. Infrastructure Layer: Database, LLM
-    2. Application Layer: Agent (비즈니스 로직)
-    3. Presentation Layer: FastAPI (webapp/routers)
+    Infrastructure Layer 중심:
+    1. Database: 세션 팩토리 관리
+    2. LLM: 모델 및 서비스 관리
+    3. Agent: 워크플로우 관리
     
-    의존성 방향: 상위 → 하위 (단방향)
+    Service Layer는 독립적 생성으로 순환참조 제거
     """
     
     # Configuration Layer
     config = providers.Configuration()
     
     # Infrastructure Layer (기반 인프라)
-    database = providers.Container(DatabaseContainer)  # 데이터 저장소
-    llm = providers.Container(LLMContainer)            # LLM 모델 관리
-    
-    # Application Layer (비즈니스 로직) - Infrastructure에 의존
-    agent = providers.Container(
-        AgentContainer,
-        llm_container=llm  # Infrastructure Layer 의존성 주입
-        # Database는 tools에서 직접 런타임 접근
-    )
+    database = providers.Container(DatabaseContainer)  # 세션 팩토리
+    llm = providers.Container(LLMContainer)            # LLM 관리
+    agent = providers.Container(AgentContainer, llm_container=llm)  # 워크플로우
 
 
 # 전역 애플리케이션 컨테이너

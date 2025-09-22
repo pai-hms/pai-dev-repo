@@ -9,7 +9,7 @@ from datetime import datetime
 
 from src.agent.settings import get_settings
 from src.database.connection import get_database_manager
-from src.database.service import get_database_service  # ✅ Service Layer 사용
+from src.database.service import get_database_service  # Service Layer 사용
 from src.crawler.sgis_client import SGISClient, SGISDataType
 
 

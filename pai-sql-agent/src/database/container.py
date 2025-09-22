@@ -1,18 +1,18 @@
 """
-Database DI Container - 완전한 DI 기반 데이터베이스 계층
-dependency-injector를 사용한 현대적 DI 패턴 구현
+Database DI Container - Infrastructure Layer
+세션 팩토리 및 데이터베이스 연결 관리
 """
 import logging
 from dependency_injector import containers, providers
 
-from .settings import DatabaseSettings, get_database_settings
+from .settings import get_database_settings
 from .session_factory import DatabaseSessionFactory
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseContainer(containers.DeclarativeContainer):
-    """완전한 DI 기반 데이터베이스 계층 컨테이너"""
+    """데이터베이스 Infrastructure Layer 컨테이너 - 순환참조 제거"""
     
     # 1. 설정 주입 (싱글톤)
     settings = providers.Singleton(get_database_settings)
@@ -27,13 +27,6 @@ class DatabaseContainer(containers.DeclarativeContainer):
     session_factory = providers.Callable(
         lambda factory_instance: factory_instance.get_session,
         factory_instance=session_factory_instance
-    )
-    
-
-    # 4. 데이터베이스 서비스 (팩토리 패턴) - 문자열 참조로 순환 import 방지
-    database_service = providers.Factory(
-        "src.database.service.DatabaseService",
-        session_factory=session_factory
     )
 
 

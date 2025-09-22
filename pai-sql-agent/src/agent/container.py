@@ -1,13 +1,12 @@
 """
-Agent Container - Application Layer
-Clean Architecture 기반 비즈니스 로직 계층
+Agent Container - Application Layer (순환참조 제거)
+LangGraph 워크플로우 관리에 집중
 """
 import logging
 from dependency_injector import containers, providers
 from .settings import get_settings
 from .tools import AVAILABLE_TOOLS
 from .graph import create_sql_agent_graph
-from .service import SQLAgentService
 from src.llm.container import LLMContainer
 
 logger = logging.getLogger(__name__)
@@ -15,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 class AgentContainer(containers.DeclarativeContainer):
     """
-    Application Layer - Agent Container
+    Application Layer - Agent Container (순환참조 제거)
     
     역할:
-    - SQL Agent 비즈니스 로직 조합
     - LangGraph 워크플로우 관리
-    - 도구(Tools) 및 서비스 통합
+    - 도구(Tools) 관리
+    - 설정 관리
     
     의존성: Infrastructure Layer (LLM)
     """
@@ -38,12 +37,6 @@ class AgentContainer(containers.DeclarativeContainer):
     # Infrastructure Layer - LangGraph Workflow
     workflow = providers.Resource(
         create_sql_agent_graph
-    )
-    
-    # Application Layer - Agent Service (비즈니스 로직 집중점)
-    agent_service = providers.Factory(
-        SQLAgentService,
-        workflow=workflow
     )
 
 

@@ -1,6 +1,6 @@
 """
-Database Service Layer - 완전한 DI 기반 Repository 중심 아키텍처
-Repository가 데이터 제어권을 담당하며, Service는 비즈니스 로직만 처리
+Database Service Layer - 독립적 서비스 (순환참조 제거)
+Repository 패턴 기반 데이터베이스 비즈니스 로직 처리
 """
 import logging
 from typing import List, Dict, Any, Optional, Callable
@@ -18,15 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
-    """데이터베이스 서비스 - 완전한 DI 기반 비즈니스 로직 담당"""
+    """데이터베이스 서비스 - 독립적 서비스 (순환참조 제거)"""
     
     def __init__(self, session_factory: Callable[[], AbstractContextManager[AsyncSession]]):
         """
         Args:
-            session_factory: 세션 팩토리 함수 (DI로 주입됨)
+            session_factory: 세션 팩토리 함수
         """
         self.session_factory = session_factory
-        logger.info("DatabaseService 초기화 완료 (완전한 DI 기반)")
+        logger.info("DatabaseService 초기화 완료 (독립적 서비스)")
     
     async def get_population_by_region(self, region_name: str, year: int = 2023) -> Optional[StatisticsData]:
         """지역별 인구 조회"""
