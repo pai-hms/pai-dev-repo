@@ -6,8 +6,10 @@ from typing import Optional, Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 from psycopg_pool import AsyncConnectionPool
+from psycopg.rows import dict_row
 from langchain_core.messages import SystemMessage
 
 from .nodes import SQLAgentState, SQLPromptNode, SQLAgentNode, SQLSummaryNode, SQLResponseNode
@@ -132,19 +134,33 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
     # ================== 메모리 설정 ==================
     checkpointer = None
     try:
-        if settings.enable_memory and settings.postgres_url:
-            # LangGraph 가이드에 따른 PostgreSQL 연결 풀 설정
+        if settings.enable_memory and settings.DATABASE_URL:
+            logger.info("PostgresSaver 연결 풀 설정 시작")
+            
+            # 최적화된 PostgreSQL 연결 풀 설정
+            
             pool = AsyncConnectionPool(
-                conninfo=settings.postgres_url,
-                max_size=10,
-                check=AsyncConnectionPool.check_connection
+                conninfo=settings.DATABASE_URL,
+                max_size=settings.POSTGRES_MAX_CONNECTIONS,  # 설정 기반 최대 연결 수
+                min_size=2,  # 최소 연결 수 (항상 2개 유지)
+                check=AsyncConnectionPool.check_connection,
+                kwargs={
+                    "autocommit": settings.POSTGRES_AUTOCOMMIT,  # 설정 기반 자동 커밋
+                    "prepare_threshold": settings.POSTGRES_PREPARE_THRESHOLD,  # Prepared Statement 설정
+                    "row_factory": dict_row,  # 딕셔너리 형태로 결과 반환
+                }
             )
+            
+            # 연결 풀 열기 (대기 시간 설정)
+            await pool.open(wait=True, timeout=10.0)
+            logger.info(f"PostgreSQL 연결 풀 생성 완료 (max_size: {settings.POSTGRES_MAX_CONNECTIONS})")
+            
             checkpointer = AsyncPostgresSaver(pool)
             
             # setup() 시 인덱스 생성 오류 방지
             try:
                 await checkpointer.setup()
-                logger.info("PostgreSQL 메모리 활성화")
+                logger.info("PostgresSaver 테이블 및 인덱스 설정 완료")
             except Exception as setup_error:
                 error_msg = str(setup_error).lower()
                 if ("transaction block" in error_msg or 
@@ -155,12 +171,24 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
                     # 인덱스 오류는 무시하고 checkpointer 사용
                 else:
                     logger.error(f"PostgresSaver setup 실패: {setup_error}")
+                    # 연결 풀 정리 후 재시도
+                    await pool.close()
                     raise setup_error
+                    
+            logger.info("PostgreSQL 기반 메모리 시스템 활성화 완료")
         else:
-            logger.info("메모리 비활성화 (메모리 없이 실행)")
+            logger.info("메모리 비활성화 (DATABASE_URL 없음 또는 enable_memory=False)")
     except Exception as e:
-        logger.warning(f"메모리 설정 실패 (메모리 없이 계속): {e}")
+        logger.warning(f"PostgresSaver 설정 실패, InMemory로 Fallback: {e}")
         checkpointer = None
+        
+        # Fallback: InMemory 체크포인터 사용
+        try:
+            checkpointer = MemorySaver()
+            logger.info("InMemory 체크포인터로 Fallback 완료")
+        except Exception as fallback_error:
+            logger.error(f"InMemory Fallback도 실패: {fallback_error}")
+            checkpointer = None
     
     # ================== 그래프 컴파일 ==================
     logger.info("그래프 컴파일 시작...")

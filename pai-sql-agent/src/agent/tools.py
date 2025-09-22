@@ -10,8 +10,11 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.agent.prompt import DATABASE_SCHEMA_INFO
+from src.agent.utils import estimate_context_tokens, should_filter_context
+from src.agent.settings import get_settings
 from src.database.service import get_database_service
 from src.llm.service import get_llm_service
+from src.llm.settings import LLMSettings
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,24 @@ async def sql_db_query(query: str) -> str:
         # 결과를 테이블 형태로 포맷팅
         formatted_result = format_query_results(result.data)
         logger.info("결과 포맷팅 완료")
+        
+        # 컨텍스트 길이 체크 및 필터링
+        settings = get_settings()
+        # 기본 모델 사용 (LLM 설정에서 가져옴)
+        llm_settings = LLMSettings()
+        current_model = llm_settings.DEFAULT_MODEL_KEY
+        
+        if should_filter_context(formatted_result, settings.DOCUMENT_MAX_TOKENS, current_model):
+            current_tokens = estimate_context_tokens(formatted_result, current_model)
+            logger.warning(f"SQL 결과가 토큰 제한 초과 ({current_tokens} > {settings.DOCUMENT_MAX_TOKENS})")
+            
+            # 결과 행 수 제한으로 크기 줄이기
+            lines = formatted_result.split('\n')
+            if len(lines) > 20:  # 헤더 + 최대 15개 행만 유지
+                truncated_result = '\n'.join(lines[:17]) + f'\n... (총 {result.row_count}개 행 중 15개만 표시)'
+                logger.info(f"결과 크기 제한: {len(lines)} → 17 라인")
+                formatted_result = truncated_result
+        
         logger.info(f"반환할 결과:")
         logger.info(f"   {formatted_result[:200]}...")
         

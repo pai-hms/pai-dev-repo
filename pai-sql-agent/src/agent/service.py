@@ -12,6 +12,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from .domain import QueryParam, AgentResponse, ToolCallInfo, ToolResult
 from .nodes import create_initial_state
+from .graph import create_sql_agent_graph
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,6 @@ class SQLAgentService:
         # 워크플로우 지연 로딩
         if not self._agent_graph:
             logger.info("워크플로우 지연 로딩 시작")
-            from .graph import create_sql_agent_graph
             self._agent_graph = await create_sql_agent_graph()
             self._initialized = True
             logger.info("워크플로우 지연 로딩 완료")

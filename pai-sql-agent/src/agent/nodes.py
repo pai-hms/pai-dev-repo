@@ -10,6 +10,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import add_messages
 
 from src.agent.prompt import DATABASE_SCHEMA_INFO
+from src.agent.utils import trim_messages_by_tokens, count_messages_tokens
+from src.agent.settings import get_settings
 from src.llm.service import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,40 @@ class SQLAgentNode:
             logger.info(f"   사용 가능한 도구 수: {len(self.tools)}")
             logger.info(f"   도구 목록: {[tool.name for tool in self.tools]}")
             logger.info(f"   입력 메시지 수: {len(state.get('messages', []))}")
+            
+            # 설정 로드
+            settings = get_settings()
+            
+            # 현재 사용 중인 모델 확인 (config에서 가져오거나 기본값 사용)
+            current_model = "gpt-4o-mini"  # 기본값
+            if config and hasattr(config, 'configurable') and config.configurable:
+                current_model = config.configurable.get('model', current_model)
+            
+            logger.info(f"   사용 중인 모델: {current_model}")
+            
+            # 메시지 트리밍 적용
+            original_messages = state.get("messages", [])
+            if original_messages:
+                # 현재 토큰 수 계산
+                current_tokens = count_messages_tokens(original_messages, current_model)
+                logger.info(f"   현재 메시지 토큰 수: {current_tokens}")
+                
+                # 토큰 수가 제한을 초과하는 경우 트리밍
+                if current_tokens > settings.TRIM_MAX_TOKENS:
+                    logger.info(f"   토큰 수 초과 ({current_tokens} > {settings.TRIM_MAX_TOKENS}), 메시지 트리밍 시작")
+                    trimmed_messages = trim_messages_by_tokens(
+                        messages=original_messages,
+                        max_tokens=settings.TRIM_MAX_TOKENS,
+                        model_name=current_model,
+                        strategy="last",  # 최신 메시지 우선 보존
+                        preserve_system=True  # 시스템 메시지 보존
+                    )
+                    
+                    # 상태 업데이트
+                    state = {**state, "messages": trimmed_messages}
+                    logger.info(f"   메시지 트리밍 완료: {len(original_messages)} → {len(trimmed_messages)} 메시지")
+                else:
+                    logger.info(f"   토큰 수 정상 범위 내 ({current_tokens} <= {settings.TRIM_MAX_TOKENS})")
             
             # 사용자 질문 추출 (시스템 메시지 제외)
             user_question = "질문 없음"
