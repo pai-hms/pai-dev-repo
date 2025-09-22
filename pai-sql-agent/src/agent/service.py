@@ -142,20 +142,14 @@ class SQLAgentService:
             yield json.dumps(error_response.to_dict(), ensure_ascii=False) + '\n'
 
 
-# 전역 서비스 인스턴스 (하위 호환성을 위해 유지)
-_sql_agent_service: Optional[SQLAgentService] = None
-_service_lock = asyncio.Lock()
+# 직접 생성 방식으로 전역 변수 불필요
 
 
 async def get_sql_agent_service() -> SQLAgentService:
-    """SQL Agent 서비스 싱글톤 인스턴스 반환 (하위 호환성)"""
-    global _sql_agent_service
-    
-    if _sql_agent_service is None:
-        async with _service_lock:
-            if _sql_agent_service is None:
-                # Container 없이 직접 워크플로우 생성
-                workflow = await create_sql_agent_graph()
-                _sql_agent_service = SQLAgentService(workflow)
-    
-    return _sql_agent_service
+    """
+    SQL Agent 서비스 인스턴스 반환 - 직접 생성 방식
+    매번 새로운 인스턴스를 생성하여 순환 참조 완전 차단
+    """
+    # Container 없이 직접 워크플로우 생성
+    workflow = await create_sql_agent_graph()
+    return SQLAgentService(workflow)

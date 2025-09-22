@@ -127,7 +127,7 @@ class DatabaseRepository:
             AND table_name = :table_name
             ORDER BY ordinal_position
             """
-            
+        
             result = await self.session.execute(text(query), {"table_name": table_name})
             columns = result.fetchall()
             

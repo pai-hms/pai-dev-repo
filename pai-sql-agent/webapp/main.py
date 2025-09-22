@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from webapp.routers import agent, data
 from webapp.models import ErrorResponse
 from src.agent.settings import get_settings
-from src.database.factory import get_database_service
+from src.database.service import get_database_service
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """애플리케이션 생명주기 관리 - Factory 패턴 기반"""
+    """애플리케이션 생명주기 관리 - 직접 생성 방식 기반"""
     # 시작 시
-    logger.info("애플리케이션 시작 (Factory 패턴 기반)")
+    logger.info("애플리케이션 시작 (직접 생성 방식 기반)")
     
     try:
         # 데이터베이스 연결 테스트
@@ -89,7 +89,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """헬스 체크 엔드포인트 - Factory 패턴 기반"""
+    """헬스 체크 엔드포인트 - 직접 생성 방식 기반"""
     try:
         # 데이터베이스 연결 테스트
         db_service = await get_database_service()

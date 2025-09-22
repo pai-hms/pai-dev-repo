@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .repository import DatabaseRepository
 from .domains import StatisticsData, QueryResult
+from .session_factory import DatabaseSessionFactory
+from .settings import get_database_settings
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +139,17 @@ def create_database_service(session_factory: Callable[[], AbstractContextManager
     return DatabaseService(session_factory)
 
 
-# 하위 호환성을 위한 래퍼 함수
+# 직접 생성 함수 - Container 의존성 없음
 async def get_database_service() -> DatabaseService:
-    """데이터베이스 서비스 인스턴스 반환 - Factory 패턴 사용"""
-    from .factory import get_database_service as factory_get_service
-    return await factory_get_service()
+    """
+    데이터베이스 서비스 인스턴스 반환 - 직접 생성 방식
+    매번 새로운 인스턴스를 생성하여 순환 참조 완전 차단
+    """
+    settings = get_database_settings()
+    session_factory_instance = DatabaseSessionFactory(settings)
+    
+    # 세션 팩토리 함수 생성
+    session_factory = session_factory_instance.get_session
+    
+    # 매번 새로운 DatabaseService 인스턴스 생성
+    return create_database_service(session_factory)

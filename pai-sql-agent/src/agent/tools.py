@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.agent.prompt import DATABASE_SCHEMA_INFO
 from src.agent.utils import estimate_context_tokens, should_filter_context
 from src.agent.settings import get_settings
-from src.database.factory import get_database_service
+from src.database.service import get_database_service
 from src.llm.service import get_llm_service
 from src.llm.settings import LLMSettings
 

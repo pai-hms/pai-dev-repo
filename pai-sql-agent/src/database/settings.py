@@ -6,6 +6,8 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from src.agent.settings import get_settings
+
 
 class DatabaseSettings(BaseSettings):
     """데이터베이스 전용 설정"""
@@ -42,7 +44,6 @@ def get_database_settings() -> DatabaseSettings:
     """데이터베이스 설정 인스턴스 반환 - 기존 AgentSettings와 호환"""
     # 기존 AgentSettings에서 DATABASE_URL 가져오기
     try:
-        from src.agent.settings import get_settings
         agent_settings = get_settings()
         
         # 기존 설정의 DATABASE_URL 사용
