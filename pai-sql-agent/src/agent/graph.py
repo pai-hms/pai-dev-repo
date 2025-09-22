@@ -1,5 +1,5 @@
 """
-SQL Agent 전용 LangGraph - 표준 에이전트 패턴 (다단계 추론 지원)
+SQL Agent 전용 LangGraph
 """
 import logging
 from typing import Optional, Literal
@@ -25,7 +25,9 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
     logger.info("SQL Agent 그래프 생성 시작")
     
     # 설정 로드
+    logger.info("Agent 설정 로드 시작")
     settings = await get_agent_settings()
+    logger.info("Agent 설정 로드 완료")
     
     # 그래프 구성
     workflow = StateGraph(SQLAgentState)
@@ -34,10 +36,14 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
     
     # 1. 에이전트 노드 (핵심 추론 엔진) - 시스템 프롬프트 포함
     async def agent_node(state: SQLAgentState):
+        logger.info("에이전트 노드 실행 시작")
+        logger.info(f"현재 메시지 수: {len(state.get('messages', []))}")
+        
         # 시스템 프롬프트 자동 추가
         if not state.get("messages") or not any(
             msg.__class__.__name__ == "SystemMessage" for msg in state["messages"]
         ):
+            logger.info("시스템 프롬프트 추가")
             system_prompt = f"""당신은 데이터 전문 SQL 분석가입니다.
 
 데이터베이스 스키마:
@@ -53,9 +59,20 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
             messages = [SystemMessage(content=system_prompt)] + state.get("messages", [])
             state = {**state, "messages": messages}
         
-        llm_service = await get_llm_service()
-        sql_agent = SQLAgentNode(llm_service, AVAILABLE_TOOLS)
-        return await sql_agent(state)
+        try:
+            logger.info("LLM 서비스 가져오기")
+            llm_service = await get_llm_service()
+            logger.info("LLM 서비스 가져오기 완료")
+            
+            logger.info("SQL Agent 노드 생성")
+            sql_agent = SQLAgentNode(llm_service, AVAILABLE_TOOLS)
+            logger.info("SQL Agent 노드 실행")
+            result = await sql_agent(state)
+            logger.info(f"에이전트 노드 실행 완료: {type(result)}")
+            return result
+        except Exception as e:
+            logger.error(f"Agent 노드 실행 오류: {e}")
+            raise
     
     workflow.add_node("agent", agent_node)
     
@@ -146,7 +163,13 @@ async def create_sql_agent_graph() -> CompiledStateGraph:
         checkpointer = None
     
     # ================== 그래프 컴파일 ==================
-    graph = workflow.compile(checkpointer=checkpointer)
+    logger.info("그래프 컴파일 시작...")
+    try:
+        graph = workflow.compile(checkpointer=checkpointer)
+        logger.info("그래프 컴파일 성공!")
+    except Exception as compile_error:
+        logger.error(f"그래프 컴파일 실패: {compile_error}")
+        raise compile_error
     
     logger.info("단순화된 SQL Agent 그래프 생성 완료")
     logger.info(f"   - 워크플로우: START → agent ↔ tools → END")

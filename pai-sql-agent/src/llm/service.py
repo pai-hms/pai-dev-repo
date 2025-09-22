@@ -141,7 +141,7 @@ class LLMService:
             provider = self.config.provider.lower().strip() if self.config.provider else "google"
             model_name = self.config.model_name.strip() if self.config.model_name else "gemini-2.5-flash-lite"
             
-            logger.info(f"🔧 사용할 Provider: '{provider}', Model: '{model_name}'")
+            logger.info(f"사용할 Provider: '{provider}', Model: '{model_name}'")
             
             if provider == "google":
                 # Google Gemini 모델 생성
@@ -152,7 +152,7 @@ class LLMService:
                     timeout=self.config.request_timeout,
                     max_retries=self.config.max_retries,
                     top_p=self.config.top_p,
-                    google_api_key=self.settings.google_api_key,
+                    google_api_key=self.settings.GOOGLE_API_KEY,
                 )
                 logger.info(f"Google Gemini 모델 생성: {model_name}")
                 
@@ -168,13 +168,13 @@ class LLMService:
                     top_p=self.config.top_p,
                     frequency_penalty=self.config.frequency_penalty,
                     presence_penalty=self.config.presence_penalty,
-                    openai_api_key=self.settings.openai_api_key,
+                    openai_api_key=self.settings.OPENAI_API_KEY,
                 )
                 logger.info(f"OpenAI GPT 모델 생성: {model_name}")
                 
             else:
                 # 기본값으로 Google Gemini 사용
-                logger.warning(f"⚠️ 알 수 없는 프로바이더 '{provider}', Google Gemini로 기본 설정")
+                logger.warning(f"알 수 없는 프로바이더 '{provider}', Google Gemini로 기본 설정")
                 llm = ChatGoogleGenerativeAI(
                     model="gemini-2.5-flash-lite",
                     temperature=self.config.temperature,
@@ -182,7 +182,7 @@ class LLMService:
                     timeout=self.config.request_timeout,
                     max_retries=self.config.max_retries,
                     top_p=self.config.top_p,
-                    google_api_key=self.settings.google_api_key,
+                    google_api_key=self.settings.GOOGLE_API_KEY,
                 )
                 logger.info(f"기본 Google Gemini 모델 생성: gemini-2.5-flash-lite")
             

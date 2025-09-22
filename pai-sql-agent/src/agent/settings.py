@@ -11,8 +11,8 @@ class AgentSettings(BaseSettings):
     """통합 애플리케이션 설정 클래스"""
     
     # LLM API 설정
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API 키")
-    google_api_key: Optional[str] = Field(default=None, description="Google Gemini API 키")
+    OPENAI_API_KEY: Optional[str] = Field(default=None, description="OpenAI API 키")
+    GOOGLE_API_KEY: Optional[str] = Field(default=None, description="Google Gemini API 키")
     
     # 데이터베이스 설정 (통합)
     DATABASE_URL: str = Field(

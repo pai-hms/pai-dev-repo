@@ -179,13 +179,6 @@ for message in st.session_state.messages:
                 st.write(f"🟣 도구 실행: {info.get('tools_executed', 0)}")
                 st.write(f"⏱️ 응답 시간: {info.get('response_time', 0):.2f}초")
         
-        # 진행 과정 히스토리 표시 (있는 경우)
-        if message["role"] == "assistant" and "progress_history" in message:
-            with st.expander("📋 진행 과정"):
-                for step in message["progress_history"]:
-                    timestamp = step.get("timestamp", "")
-                    content = step.get("content", "")
-                    st.write(f"**{timestamp}** - {content}")
 
 # 사용자 입력
 if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."):
@@ -214,7 +207,6 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             current_progress = 0
             used_tools = []
             streaming_info = {}
-            progress_history = []
             
             # 진행 단계 정의
             progress_steps = {
@@ -228,7 +220,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                 for chunk in call_agent_stream(prompt):
                     chunk_type = chunk.get("type", "unknown")
                     
-                    if chunk_type == "token":
+                    if chunk_type == "ai_message":
                         token_content = chunk.get("content", "")
                         full_response += token_content
                         response_container.write(full_response + "▌")
@@ -236,12 +228,6 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                     elif chunk_type == "progress":
                         progress_content = chunk.get("content", "")
                         current_time = datetime.now().strftime("%H:%M:%S")
-                        
-                        # 진행 히스토리에 추가
-                        progress_history.append({
-                            "timestamp": current_time,
-                            "content": progress_content
-                        })
                         
                         # Progress Bar 업데이트
                         for key, progress_value in progress_steps.items():
@@ -264,10 +250,19 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                     elif chunk_type == "tool_call":
                         # 도구 사용 정보 수집
                         tool_info = {
-                            "tool_name": chunk.get("tool_name", "Unknown"),
+                            "tool_name": chunk.get("content", chunk.get("tool_name", "Unknown")),
                             "success": chunk.get("success", True)
                         }
                         used_tools.append(tool_info)
+                        
+                        # 도구 호출 진행 상황 표시
+                        progress_bar.progress(40)
+                        status_text.text(f"🔧 도구 실행 중: {tool_info['tool_name']}")
+                    
+                    elif chunk_type == "tool_result":
+                        # 도구 실행 결과 표시
+                        progress_bar.progress(70)
+                        status_text.text("📊 데이터 조회 완료")
                     
                     elif chunk_type == "complete" or chunk_type == "done":
                         progress_bar.progress(100)
@@ -275,8 +270,8 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                         # 스트리밍 정보 수집
                         streaming_info = {
                             "total_tokens": len(full_response.split()) if full_response else 0,
-                            "nodes_executed": len(progress_history),
-                            "state_updates": len([p for p in progress_history if "상태" in p.get("content", "")]),
+                            "nodes_executed": 1,
+                            "state_updates": 1,
                             "tools_executed": len(used_tools),
                             "response_time": chunk.get("response_time", 0)
                         }
@@ -295,8 +290,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                     "role": "assistant",
                     "content": full_response,
                     "used_tools": used_tools,
-                    "streaming_info": streaming_info,
-                    "progress_history": progress_history
+                    "streaming_info": streaming_info
                 }
                 st.session_state.messages.append(assistant_message)
                 
@@ -311,8 +305,6 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                 "content": f"죄송합니다. 클라이언트 오류가 발생했습니다: {str(e)}",
                 "used_tools": []
             })
-
-
 
 # 푸터
 st.markdown("---")

@@ -1,5 +1,5 @@
 """
-SQL Agent API 라우터
+SQL Agent API 라우터 - DI 패턴 적용
 """
 import logging
 import json
@@ -10,7 +10,8 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from webapp.models import QueryRequest
-from src.agent.service import get_sql_agent_service
+from src.agent.container import get_agent_container
+from src.agent.domain import QueryParam
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -42,21 +43,48 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
             logger.info(f"SQL Agent 요청: {request.question[:50]}...")
             logger.info(f"세션 정보 - session_id: {session_id}, thread_id: {thread_id}")
             
-            # SQL Agent 서비스 가져오기
-            agent_service = await get_sql_agent_service()
+            # DI 컨테이너에서 SQL Agent 서비스 가져오기
+            logger.info("Agent 컨테이너 가져오기 시작")
+            container = await get_agent_container()
+            logger.info("Agent 서비스 인스턴스 가져오기 시작")
+            agent_service = await container.get("agent_service")
+            logger.info("Agent 서비스 인스턴스 가져오기 완료")
+            
+            # QueryParam 도메인 객체 생성
+            query_param = QueryParam.from_request(
+                question=request.question,
+                session_id=thread_id,
+                model=getattr(request, 'model', 'gemini-2.5-flash-lite')
+            )
             
             # 멀티턴 대화를 위한 스트리밍 처리
+            logger.info("에이전트 서비스 스트리밍 시작")
+            chunk_count = 0
             async for chunk in agent_service.process_query_stream(
                 question=request.question,
-                thread_id=thread_id,  # 멀티턴 대화용 ID
-                session_id=session_id  # API 레벨 세션 ID
+                query_param=query_param
             ):
-                # 클라이언트에게 세션 정보 전달
-                if chunk.get("type") == "start":
-                    chunk["session_id"] = session_id
-                    chunk["thread_id"] = thread_id
+                chunk_count += 1
                 
-                yield f"data: {safe_json_dumps(chunk)}\n\n"
+                # JSON 문자열을 딕셔너리로 파싱
+                try:
+                    if isinstance(chunk, str):
+                        chunk_data = json.loads(chunk.strip())
+                    else:
+                        chunk_data = chunk
+                    
+                    logger.info(f"스트림 청크 #{chunk_count} 수신: {chunk_data.get('type', 'unknown')}")
+                    
+                    # 클라이언트에게 세션 정보 전달
+                    if chunk_data.get("type") == "start":
+                        chunk_data["session_id"] = session_id
+                        chunk_data["thread_id"] = thread_id
+                    
+                    yield f"data: {safe_json_dumps(chunk_data)}\n\n"
+                    
+                except json.JSONDecodeError:
+                    logger.warning(f"JSON 파싱 실패: {chunk}")
+                    yield f"data: {chunk}\n\n"
             
         except Exception as e:
             logger.error(f"스트리밍 오류: {e}")
@@ -82,9 +110,10 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
 
 @router.get("/status")
 async def get_agent_status():
-    """Agent 상태 확인"""
+    """Agent 상태 확인 - DI 패턴 적용"""
     try:
-        agent_service = await get_sql_agent_service()
+        container = await get_agent_container()
+        agent_service = await container.get("agent_service")
         return {
             "success": True,
             "status": "active" if agent_service._initialized else "initializing",
