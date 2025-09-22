@@ -28,43 +28,43 @@ async def sql_db_query(query: str) -> str:
         쿼리 실행 결과
     """
     logger.info("=" * 80)
-    logger.info("🔧 SQL_DB_QUERY 도구 호출됨")
-    logger.info(f"📝 받은 SQL 쿼리:")
+    logger.info("SQL_DB_QUERY 도구 호출됨")
+    logger.info(f"받은 SQL 쿼리:")
     logger.info(f"   {query}")
     logger.info("=" * 80)
     
     try:
-        # ✅ Service Layer를 통한 접근
+        #Service Layer를 통한 접근
         db_service = await get_database_service()
         
-        logger.info("🚀 SQL 쿼리 실행 시작...")
+        logger.info("SQL 쿼리 실행 시작...")
         result = await db_service.execute_custom_query(query)
         
-        logger.info(f"📊 쿼리 실행 완료 - 결과 수: {result.row_count}")
+        logger.info(f"쿼리 실행 완료 - 결과 수: {result.row_count}")
         
         if not result.success or not result.data:
-            logger.info("⚠️ 결과 없음 또는 실행 실패")
+            logger.info("결과 없음 또는 실행 실패")
             if not result.success:
                 return f"쿼리 실행 실패: {result.error}"
             return "쿼리 실행 결과: 데이터 없음"
         
         # 결과를 테이블 형태로 포맷팅
         formatted_result = format_query_results(result.data)
-        logger.info("✅ 결과 포맷팅 완료")
-        logger.info(f"📤 반환할 결과:")
+        logger.info("결과 포맷팅 완료")
+        logger.info(f"반환할 결과:")
         logger.info(f"   {formatted_result[:200]}...")
         
         return formatted_result
 
     except Exception as e:
-        logger.error(f"❌ SQL 실행 오류: {str(e)}")
+        logger.error(f"SQL 실행 오류: {str(e)}")
         return f"SQL 실행 중 오류 발생: {str(e)}"
 
 
 @tool
 def get_database_schema() -> str:
     """데이터베이스 스키마 정보 반환"""
-    logger.info("📋 데이터베이스 스키마 정보 요청됨")
+    logger.info("데이터베이스 스키마 정보 요청됨")
     return DATABASE_SCHEMA_INFO
 
 
@@ -72,9 +72,9 @@ def get_database_schema() -> str:
 async def generate_sql_query(question: str) -> str:
     """자연어 질문을 SQL 쿼리로 변환하는 도구"""
     try:
-        logger.info(f"🧠 SQL 생성 시작 - 질문: {question[:100]}...")
+        logger.info(f"SQL 생성 시작 - 질문: {question[:100]}...")
         
-        # ✅ Service Layer를 통한 LLM 접근
+        # Service Layer를 통한 LLM 접근
         llm_service = await get_llm_service()
         
         messages = [
@@ -95,17 +95,17 @@ async def generate_sql_query(question: str) -> str:
             HumanMessage(content=question)
         ]
         
-        # ✅ 수정: 기존 generate 메서드 사용
+        # 수정: 기존 generate 메서드 사용
         response = await llm_service.generate(messages)
         
         # SQL 부분만 추출
         sql_query = extract_sql_from_response(response.content)
         
-        logger.info(f"✅ SQL 생성 완료: {sql_query[:100]}...")
+        logger.info(f"SQL 생성 완료: {sql_query[:100]}...")
         return sql_query
         
     except Exception as e:
-        logger.error(f"❌ SQL 생성 오류: {str(e)}")
+        logger.error(f"SQL 생성 오류: {str(e)}")
         return f"SELECT 'SQL 생성 중 오류 발생: {str(e)}' as error_message;"
 
 
@@ -117,12 +117,12 @@ def validate_sql_query(query: str) -> str:
         is_valid, error_msg = validator.validate(query)
         
         if is_valid:
-            return f"✅ SQL 검증 성공: {query}"
+            return f"SQL 검증 성공: {query}"
         else:
-            return f"❌ SQL 검증 실패: {error_msg}"
+            return f"SQL 검증 실패: {error_msg}"
             
     except Exception as e:
-        return f"❌ 검증 오류: {str(e)}"
+        return f"검증 오류: {str(e)}"
 
 
 def format_query_results(results: List[Dict[str, Any]]) -> str:

@@ -18,13 +18,13 @@ class DatabaseService:
     
     def __init__(self, db_manager):
         self.db_manager = db_manager
-        logger.info("✅ DatabaseService 초기화 완료")
+        logger.info("DatabaseService 초기화 완료")
     
     async def get_population_by_region(self, region_name: str, year: int = 2023) -> Optional[StatisticsData]:
         """지역별 인구 조회"""
         try:
             async with self.db_manager.get_async_session() as session:
-                # ✅ Repository가 데이터 제어권 담당
+                # Repository가 데이터 제어권 담당
                 repository = DatabaseRepository(session)
                 
                 query = """
@@ -55,7 +55,7 @@ class DatabaseService:
         """인구 상위 지역 조회"""
         try:
             async with self.db_manager.get_async_session() as session:
-                # ✅ Repository가 데이터 제어권 담당
+                # Repository가 데이터 제어권 담당
                 repository = DatabaseRepository(session)
                 
                 query = """
@@ -88,7 +88,7 @@ class DatabaseService:
         
         try:
             async with self.db_manager.get_async_session() as session:
-                # ✅ Repository가 데이터 제어권 담당
+                # Repository가 데이터 제어권 담당
                 repository = DatabaseRepository(session)
                 results = await repository.execute_raw_query(query)
                 
@@ -134,7 +134,7 @@ async def get_database_service() -> DatabaseService:
     global _database_service
     
     if _database_service is None:
-        # ✅ Container 의존성 제거 - 직접 DatabaseManager 사용
+        # Container 의존성 제거 - 직접 DatabaseManager 사용
         db_manager = await get_database_manager()
         _database_service = DatabaseService(db_manager)
     

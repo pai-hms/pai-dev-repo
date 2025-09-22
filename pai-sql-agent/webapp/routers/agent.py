@@ -34,7 +34,7 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
     """SQL Agent 스트리밍 API - 멀티턴 대화 지원"""
     
     async def generate_stream():
-        # ✅ 세션 관리 개선: session_id를 thread_id로 사용
+        # 세션 관리 개선: session_id를 thread_id로 사용
         session_id = request.session_id or str(uuid.uuid4())
         thread_id = request.thread_id or session_id  # thread_id가 없으면 session_id 사용
         
@@ -45,7 +45,7 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
             # SQL Agent 서비스 가져오기
             agent_service = await get_sql_agent_service()
             
-            # ✅ 멀티턴 대화를 위한 스트리밍 처리
+            # 멀티턴 대화를 위한 스트리밍 처리
             async for chunk in agent_service.process_query_stream(
                 question=request.question,
                 thread_id=thread_id,  # 멀티턴 대화용 ID

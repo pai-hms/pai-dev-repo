@@ -65,7 +65,7 @@ class DatabaseManager:
             finally:
                 await session.close()
     
-    # ✅ 추가: get_session 메서드 (별칭)
+    # 추가: get_session 메서드 (별칭)
     def get_session(self):
         """세션 컨텍스트 매니저 (별칭)"""
         return self.get_async_session()

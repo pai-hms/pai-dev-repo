@@ -19,24 +19,24 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # 시작 시
-    logger.info("🚀 애플리케이션 시작")
+    logger.info("애플리케이션 시작")
     
     try:
-        # ✅ 순서 중요: 데이터베이스 먼저 초기화
+        # 순서 중요: 데이터베이스 먼저 초기화
         db_manager = await get_database_manager()
         await db_manager.create_tables()
-        logger.info("✅ 데이터베이스 테이블 생성 완료")
+        logger.info("데이터베이스 테이블 생성 완료")
         
         # 데이터베이스 초기화 완료
         
         yield
         
     except Exception as e:
-        logger.error(f"❌ 애플리케이션 시작 실패: {e}")
+        logger.error(f"애플리케이션 시작 실패: {e}")
         raise
     finally:
         # 종료 시
-        logger.info("🛑 애플리케이션 종료")
+        logger.info("애플리케이션 종료")
 
 
 # FastAPI 애플리케이션 생성

@@ -44,7 +44,7 @@ class SQLAgentService:
             # SQL Agent 그래프 생성
             self._agent_graph = await create_sql_agent_graph()
             
-            # ✅ PostgresSaver 사용으로 별도 세션 서비스 불필요
+            # PostgresSaver 사용으로 별도 세션 서비스 불필요
             # self._session_service = await get_session_service()   
             
             self._initialized = True
@@ -128,13 +128,13 @@ class SQLAgentService:
             token_count = 0
             
             
-            # **🎯 단일 스트림으로 통합 (중복 실행 방지)**
+            # **단일 스트림으로 통합 (중복 실행 방지)**
             
             # **단순화된 스트리밍 (중복 실행 방지)**
             async def merge_streams():
                 """실시간 토큰 스트리밍 - 모든 노드에서 즉시 전송"""
                 
-                # ✅ 실시간 토큰 스트리밍을 위한 이벤트 스트림 사용
+                # 실시간 토큰 스트리밍을 위한 이벤트 스트림 사용
                 event_stream = self._agent_graph.astream_events(
                     initial_state,
                     config=config,
@@ -151,12 +151,12 @@ class SQLAgentService:
                         event_name = event.get("name", "")
                         event_data = event.get("data", {})
                         
-                        # 🚀 LLM 토큰 스트리밍 - 즉시 전송
+                        # LLM 토큰 스트리밍 - 즉시 전송
                         if event_type == "on_chat_model_stream":
                             chunk_data = event_data.get("chunk", {})
                             if hasattr(chunk_data, 'content') and chunk_data.content:
                                 token_count += 1
-                                logger.info(f"🔥 실시간 토큰: '{chunk_data.content}'")
+                                logger.info(f"실시간 토큰: '{chunk_data.content}'")
                                 yield {
                                     "type": "token",
                                     "content": chunk_data.content,
@@ -169,7 +169,7 @@ class SQLAgentService:
                             yield {
                                 "type": "node_update", 
                                 "node": node_name,
-                                "content": f"🔄 {node_name} 실행 중...",
+                                "content": f"{node_name} 실행 중...",
                                 "timestamp": datetime.now().isoformat()
                             }
                         
@@ -178,7 +178,7 @@ class SQLAgentService:
                             yield {
                                 "type": "tool_start",
                                 "tool": event_name,
-                                "content": f"🔧 {event_name} 실행 중...",
+                                "content": f"{event_name} 실행 중...",
                                 "timestamp": datetime.now().isoformat()
                             }
                         
@@ -186,7 +186,7 @@ class SQLAgentService:
                             yield {
                                 "type": "tool_end", 
                                 "tool": event_name,
-                                "content": f"✅ {event_name} 완료",
+                                "content": f"{event_name} 완료",
                                 "timestamp": datetime.now().isoformat()
                             }
                     
@@ -198,14 +198,14 @@ class SQLAgentService:
                         "timestamp": datetime.now().isoformat()
                     }
                 
-                logger.info(f"📊 스트리밍 완료 - 총 chunk: {chunk_count}, 토큰: {token_count}")
+                logger.info(f"스트리밍 완료 - 총 chunk: {chunk_count}, 토큰: {token_count}")
             
-            # **✅ 단순화된 스트리밍 방식**
+            # **단순화된 스트리밍 방식**
             try:
-                logger.info("🔍 스트리밍 시작 - stream_mode='messages'")
+                logger.info("스트리밍 시작 - stream_mode='messages'")
                 
                 async for result_chunk in merge_streams():
-                    # ✅ 최종 응답 캐시
+                    # 최종 응답 캐시
                     if result_chunk.get("type") == "token":
                         if final_response is None:
                             final_response = ""
@@ -213,10 +213,10 @@ class SQLAgentService:
                     
                     yield result_chunk
                 
-                logger.info(f"📝 PostgresSaver를 통해 대화 상태 자동 저장됨 (thread_id: {thread_id})")
+                logger.info(f"PostgresSaver를 통해 대화 상태 자동 저장됨 (thread_id: {thread_id})")
             
             except Exception as stream_error:
-                logger.error(f"❌ 스트리밍 오류: {stream_error}")
+                logger.error(f"스트리밍 오류: {stream_error}")
                 
                 # Fallback 처리...
                 try:
@@ -237,7 +237,7 @@ class SQLAgentService:
                                 break
                         
                 except Exception as fallback_error:
-                    logger.error(f"❌ Fallback 오류: {fallback_error}")
+                    logger.error(f"Fallback 오류: {fallback_error}")
                     yield {
                         "type": "error",
                         "content": "응답을 생성할 수 없습니다.",
@@ -247,15 +247,15 @@ class SQLAgentService:
             # 완료 신호
             yield {
                 "type": "done",
-                "content": "✅ SQL 분석이 완료되었습니다.",
+                "content": "SQL 분석이 완료되었습니다.",
                 "timestamp": datetime.now().isoformat()
             }
             
         except Exception as e:
-            logger.error(f"❌ 전체 스트리밍 처리 실패: {e}")
+            logger.error(f"전체 스트리밍 처리 실패: {e}")
             yield {
                 "type": "error",
-                "content": f"❌ 처리 중 오류가 발생했습니다: {str(e)}",
+                "content": f"처리 중 오류가 발생했습니다: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -271,7 +271,7 @@ async def _monitor_events(self, initial_state, config):
             yield {
                 "type": "tool_start",
                 "tool": event.get("name", ""),
-                "content": f"🔧 {event.get('name', '')} 실행 중...",
+                "content": f"{event.get('name', '')} 실행 중...",
                 "timestamp": datetime.now().isoformat()
             }
         
@@ -279,7 +279,7 @@ async def _monitor_events(self, initial_state, config):
             yield {
                 "type": "tool_end",
                 "tool": event.get("name", ""),
-                "content": f"✅ {event.get('name', '')} 완료",
+                "content": f"{event.get('name', '')} 완료",
                 "timestamp": datetime.now().isoformat()
             }
 

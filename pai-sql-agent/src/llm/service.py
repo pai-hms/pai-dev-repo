@@ -125,7 +125,7 @@ class LLMService:
         self.settings = get_settings()
         self._llm: Optional[BaseChatModel] = None
         
-        logger.info(f"🤖 LLM 서비스 초기화: {self.config.model_name}")
+        logger.info(f"LLM 서비스 초기화: {self.config.model_name}")
     
     @property
     def llm(self) -> BaseChatModel:
@@ -154,7 +154,7 @@ class LLMService:
                     top_p=self.config.top_p,
                     google_api_key=self.settings.google_api_key,
                 )
-                logger.info(f"🟢 Google Gemini 모델 생성: {model_name}")
+                logger.info(f"Google Gemini 모델 생성: {model_name}")
                 
             elif provider == "openai":
                 # OpenAI GPT 모델 생성
@@ -170,7 +170,7 @@ class LLMService:
                     presence_penalty=self.config.presence_penalty,
                     openai_api_key=self.settings.openai_api_key,
                 )
-                logger.info(f"🟦 OpenAI GPT 모델 생성: {model_name}")
+                logger.info(f"OpenAI GPT 모델 생성: {model_name}")
                 
             else:
                 # 기본값으로 Google Gemini 사용
@@ -184,13 +184,13 @@ class LLMService:
                     top_p=self.config.top_p,
                     google_api_key=self.settings.google_api_key,
                 )
-                logger.info(f"🟢 기본 Google Gemini 모델 생성: gemini-2.5-flash-lite")
+                logger.info(f"기본 Google Gemini 모델 생성: gemini-2.5-flash-lite")
             
-            logger.info(f"✅ LLM 모델 생성 완료: {provider}/{model_name}")
+            logger.info(f"LLM 모델 생성 완료: {provider}/{model_name}")
             return llm
             
         except Exception as e:
-            logger.error(f"❌ LLM 모델 생성 실패: {e}")
+            logger.error(f"LLM 모델 생성 실패: {e}")
             raise
     
     async def generate(
@@ -200,7 +200,7 @@ class LLMService:
     ) -> LLMResponse:
         """LLM 응답 생성 (비스트리밍)"""
         try:
-            # ✅ 수정: streaming 파라미터 제거
+            # 수정: streaming 파라미터 제거
             response = await self.llm.ainvoke(messages, **kwargs)
             
             return LLMResponse(
@@ -211,7 +211,7 @@ class LLMService:
             )
             
         except Exception as e:
-            logger.error(f"❌ LLM 응답 생성 실패: {e}")
+            logger.error(f"LLM 응답 생성 실패: {e}")
             raise
     
     async def generate_stream(
@@ -237,7 +237,7 @@ class LLMService:
                 yield chunk
                 
         except Exception as e:
-            logger.error(f"❌ LLM 스트리밍 실패: {e}")
+            logger.error(f"LLM 스트리밍 실패: {e}")
             raise
     
     def create_human_message(self, content: str) -> HumanMessage:
@@ -278,11 +278,11 @@ class LLMService:
         try:
             test_message = HumanMessage(content="test")
             await self.llm.ainvoke([test_message])
-            logger.info("✅ LLM 연결 테스트 성공")
+            logger.info("LLM 연결 테스트 성공")
             return True
             
         except Exception as e:
-            logger.error(f"❌ LLM 연결 테스트 실패: {e}")
+            logger.error(f"LLM 연결 테스트 실패: {e}")
             return False
 
 

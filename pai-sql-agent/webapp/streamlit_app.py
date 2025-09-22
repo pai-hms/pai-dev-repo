@@ -179,7 +179,7 @@ for message in st.session_state.messages:
                 st.write(f"🟣 도구 실행: {info.get('tools_executed', 0)}")
                 st.write(f"⏱️ 응답 시간: {info.get('response_time', 0):.2f}초")
         
-        # ✅ 진행 과정 히스토리 표시 (있는 경우)
+        # 진행 과정 히스토리 표시 (있는 경우)
         if message["role"] == "assistant" and "progress_history" in message:
             with st.expander("📋 진행 과정"):
                 for step in message["progress_history"]:
@@ -200,7 +200,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
     with st.chat_message("assistant"):
         response_container = st.empty()
         
-        # ✅ 간단한 Progress Bar
+        # 간단한 Progress Bar
         progress_bar = st.progress(0)
         status_text = st.empty()
         
@@ -243,7 +243,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                             "content": progress_content
                         })
                         
-                        # ✅ Progress Bar 업데이트
+                        # Progress Bar 업데이트
                         for key, progress_value in progress_steps.items():
                             if key in progress_content and progress_value > current_progress:
                                 current_progress = progress_value
@@ -251,13 +251,13 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                                 status_text.text(f"🔄 {progress_content}")
                                 break
                         
-                        # ✅ 로그에만 추가 (중복 방지)
+                        # 로그에만 추가 (중복 방지)
                         if not log_content or log_content[-1] != progress_content:
                             log_content.append(progress_content)
                             log_text = "\n".join([f"[{current_time}] {msg}" for msg in log_content[-5:]])  # 최근 5개만
                             log_container.text(log_text)
                         
-                        # ✅ 중요한 단계에만 토스트
+                        # 중요한 단계에만 토스트
                         if any(keyword in progress_content for keyword in ["시작", "완료"]):
                             st.toast(progress_content, icon='🔄')
                     
@@ -271,7 +271,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
                     
                     elif chunk_type == "complete" or chunk_type == "done":
                         progress_bar.progress(100)
-                        status_text.text("✅ 완료!")
+                        status_text.text("완료!")
                         # 스트리밍 정보 수집
                         streaming_info = {
                             "total_tokens": len(full_response.split()) if full_response else 0,
@@ -290,7 +290,7 @@ if prompt := st.chat_input("센서스 데이터에 대해 질문해보세요..."
             if full_response:
                 response_container.write(full_response)
                 
-                # ✅ 성공적인 응답을 세션 상태에 저장
+                # 성공적인 응답을 세션 상태에 저장
                 assistant_message = {
                     "role": "assistant",
                     "content": full_response,

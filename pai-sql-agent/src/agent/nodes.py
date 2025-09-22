@@ -30,10 +30,10 @@ async def create_initial_state(query: str, thread_id: str = "default") -> SQLAge
     try:
         # 단순히 현재 질문만 추가
         messages.append(HumanMessage(content=query))
-        logger.info(f"📚 PostgresSaver를 통한 멀티턴 대화 활성화 (thread_id: {thread_id})")
+        logger.info(f"PostgresSaver를 통한 멀티턴 대화 활성화 (thread_id: {thread_id})")
         
     except Exception as e:
-        logger.warning(f"⚠️ 메시지 처리 실패: {e}")
+        logger.warning(f"메시지 처리 실패: {e}")
         # Fallback: 기본 메시지만 사용
         messages = [HumanMessage(content=query)]
     
@@ -51,11 +51,11 @@ class SQLPromptNode:
     """SQL 프롬프트 생성 노드"""
     
     def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
-        logger.info("📝 SQLPromptNode 실행 시작")
+        logger.info("SQLPromptNode 실행 시작")
         logger.info(f"   입력 쿼리: '{state.get('query', '')}'")
         logger.info(f"   기존 메시지 수: {len(state.get('messages', []))}")
         
-        # ✅ 시스템 프롬프트를 맨 앞에 추가
+        # 시스템 프롬프트를 맨 앞에 추가
         system_prompt = f"""당신은 데이터 전문 SQL 분석가입니다.
 
 데이터베이스 스키마:
@@ -85,12 +85,12 @@ class SQLAgentNode:
     
     async def __call__(self, state: SQLAgentState, config: RunnableConfig = None) -> SQLAgentState:
         try:
-            logger.info("🤖 SQLAgentNode 실행 시작")
+            logger.info("SQLAgentNode 실행 시작")
             logger.info(f"   사용 가능한 도구 수: {len(self.tools)}")
             logger.info(f"   도구 목록: {[tool.name for tool in self.tools]}")
             logger.info(f"   입력 메시지 수: {len(state.get('messages', []))}")
             
-            # ✅ 사용자 질문 추출 (시스템 메시지 제외)
+            # 사용자 질문 추출 (시스템 메시지 제외)
             user_question = "질문 없음"
             if state.get('messages'):
                 # 마지막 Human 메시지 찾기
@@ -98,19 +98,19 @@ class SQLAgentNode:
                     if hasattr(msg, 'content') and msg.__class__.__name__ == 'HumanMessage':
                         user_question = msg.content
                         break
-                logger.info(f"👤 분석할 사용자 질문: '{user_question}'")
+                logger.info(f"분석할 사용자 질문: '{user_question}'")
             
             llm_with_tools = self.llm_service.llm.bind_tools(self.tools)
-            logger.info("🔧 LLM에 도구 바인딩 완료")
+            logger.info("LLM에 도구 바인딩 완료")
             
-            logger.info("🧠 LLM 추론 시작 - 질문 분석 및 도구 선택...")
+            logger.info("LLM 추론 시작 - 질문 분석 및 도구 선택...")
             message = await llm_with_tools.ainvoke(state["messages"])
-            logger.info(f"✅ LLM 응답 수신: {type(message).__name__}")
+            logger.info(f"LLM 응답 수신: {type(message).__name__}")
             
             # 도구 호출 분석
             if hasattr(message, 'tool_calls') and message.tool_calls:
                 logger.info("=" * 60)
-                logger.info(f"🎯 도구 호출 결정! 총 {len(message.tool_calls)}개 도구 호출")
+                logger.info(f"도구 호출 결정! 총 {len(message.tool_calls)}개 도구 호출")
                 
                 for i, tool_call in enumerate(message.tool_calls, 1):
                     tool_name = tool_call.get('name', 'Unknown')
@@ -125,14 +125,14 @@ class SQLAgentNode:
                         logger.info(f"   인자: {tool_args}")
                 logger.info("=" * 60)
             else:
-                logger.info("📝 일반 텍스트 응답 (도구 호출 없음)")
+                logger.info("일반 텍스트 응답 (도구 호출 없음)")
                 if hasattr(message, 'content') and message.content:
                     logger.info(f"   응답 내용: {message.content[:100]}...")
             
             return {"messages": [message]}
             
         except Exception as e:
-            logger.error(f"❌ SQL Agent 노드 오류: {e}", exc_info=True)
+            logger.error(f"SQL Agent 노드 오류: {e}", exc_info=True)
             error_message = AIMessage(content=f"처리 중 오류가 발생했습니다: {str(e)}")
             return {"messages": [error_message]}
 

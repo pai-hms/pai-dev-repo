@@ -16,7 +16,7 @@ class AgentSettings(BaseSettings):
         description="Agent State를 관리하는 DATABASE URL",
     )
     
-    # ✅ PostgresSaver 설정 - DATABASE_URL과 동일하게 사용
+    # PostgresSaver 설정 - DATABASE_URL과 동일하게 사용
     enable_memory: bool = Field(default=True, description="메모리(PostgresSaver) 활성화")
     
     # 에이전트 동작 설정
@@ -48,7 +48,7 @@ class AgentSettings(BaseSettings):
     #     """SGIS 설정이 모두 있는지 확인"""
     #     return bool(self.sgis_service_id and self.sgis_security_key)
 
-    # ✅ PostgresSaver URL을 DATABASE_URL과 동일하게 설정
+    # PostgresSaver URL을 DATABASE_URL과 동일하게 설정
     @property 
     def postgres_url(self) -> str:
         """PostgresSaver용 DATABASE URL - DATABASE_URL과 동일하게 사용"""

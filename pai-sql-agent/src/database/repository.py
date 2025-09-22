@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.database.entities import (
-    Base,  # ✅ 추가: Base import
+    Base,  # 추가: Base import
     PopulationStats,
     CompanyStats, 
     HouseholdStats,
@@ -464,11 +464,11 @@ class DatabaseRepository:
             
         except Exception as e:
             # 오류 발생 시 로깅
-            logger.error(f"❌ SQL 실행 실패: {e}")
-            logger.error(f"📝 실행된 쿼리: {query}")
+            logger.error(f"SQL 실행 실패: {e}")
+            logger.error(f"실행된 쿼리: {query}")
             if params:
-                logger.error(f"📝 파라미터: {params}")
-            logger.error(f"🔍 오류 타입: {type(e).__name__}")
+                logger.error(f"파라미터: {params}")
+            logger.error(f"오류 타입: {type(e).__name__}")
             
             # 오류 발생 시 빈 리스트 반환
             return []
