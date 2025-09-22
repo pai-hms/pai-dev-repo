@@ -52,7 +52,7 @@ async def query_sql_agent_stream(request: QueryRequest) -> StreamingResponse:
             query_param = QueryParam.from_request(
                 question=request.question,
                 session_id=thread_id,
-                model=getattr(request, 'model', 'gemini-2.5-flash-lite')
+                model=getattr(request, 'model', 'gpt-4o-mini')
             )
             
             # 멀티턴 대화를 위한 스트리밍 처리
