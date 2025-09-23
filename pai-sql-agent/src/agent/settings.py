@@ -101,20 +101,10 @@ async def get_agent_settings() -> AgentSettings:
     return _settings
 
 
-# 동기 팩토리 함수 (호환성)
-def get_agent_settings_sync() -> AgentSettings:
-    """동기 Agent 설정 반환"""
+# 동기 팩토리 함수
+def get_settings() -> AgentSettings:
+    """동기 Agent 설정 반환 - 전체 애플리케이션에서 사용"""
     global _settings
     if _settings is None:
         _settings = AgentSettings()
     return _settings
-
-
-# config/settings.py 호환성을 위한 별칭 함수들
-def get_settings() -> AgentSettings:
-    """기존 config/settings.py 호환성을 위한 별칭"""
-    return get_agent_settings_sync()
-
-
-# 타입 별칭 (호환성)
-Settings = AgentSettings
