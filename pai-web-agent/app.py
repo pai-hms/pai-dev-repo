@@ -381,6 +381,19 @@ def process_messages_mode(data, placeholder, current_response, token_buffer):
         # 메타데이터에서 노드 정보 확인
         node_info = metadata.get("langgraph_node", "unknown") if isinstance(metadata, dict) else "unknown"
         
+        # 도구 사용 감지 및 카운트 (중복 방지)
+        if hasattr(message_chunk, 'tool_calls') and message_chunk.tool_calls:
+            # 이미 카운트된 도구 호출인지 확인
+            if "counted_tool_calls" not in st.session_state:
+                st.session_state.counted_tool_calls = set()
+            
+            # 도구 호출 ID 생성 (메시지 ID + 도구 이름)
+            tool_call_id = f"{getattr(message_chunk, 'id', 'unknown')}_{message_chunk.tool_calls[0].get('name', 'unknown')}"
+            
+            if tool_call_id not in st.session_state.counted_tool_calls:
+                st.session_state.conversation_stats["tool_usage_count"] += 1
+                st.session_state.counted_tool_calls.add(tool_call_id)
+        
         # AI 응답만 표시 (도구 노드 제외)
         if token_content and node_info != "tools":
             with placeholder.container():
@@ -770,6 +783,9 @@ def display_advanced_sidebar():
                 "tool_usage_count": 0,
                 "avg_response_time": 0.0
             }
+            # 카운트된 도구 호출 기록도 초기화
+            if "counted_tool_calls" in st.session_state:
+                st.session_state.counted_tool_calls = set()
             st.success("✅ 대화 기록이 완전히 삭제되었습니다!")
             st.rerun()
         
