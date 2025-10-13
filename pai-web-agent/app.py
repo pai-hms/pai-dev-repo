@@ -73,6 +73,34 @@ st.markdown("""
         background-color: #f8f9fa;
         border: 1px solid #dee2e6;
     }
+    .settings-monitor {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .settings-changed-alert {
+        background-color: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+        animation: shake 0.5s;
+    }
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-5px); }
+        75% { transform: translateX(5px); }
+    }
+    .settings-applied {
+        background-color: #d4edda;
+        border-left: 4px solid #28a745;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -92,10 +120,22 @@ def initialize_session_state():
             "total_queries": 0,
             "successful_responses": 0,
             "tool_usage_count": 0,
-            "avg_response_time": 0.0
+            "avg_response_time": 0.0,
+            "avg_first_token_time": 0.0
         }
     if "api_keys_set" not in st.session_state:
         st.session_state.api_keys_set = False
+    if "current_agent_settings" not in st.session_state:
+        st.session_state.current_agent_settings = {
+            "model": "gpt-4o-mini",
+            "temperature": 0.1,
+            "search_depth": "basic",
+            "max_results": 5,
+            "include_domains": ["*.go.kr", "*.or.kr"],
+            "exclude_domains": []
+        }
+    if "settings_changed" not in st.session_state:
+        st.session_state.settings_changed = False
 
 
 def check_api_keys() -> bool:
@@ -202,13 +242,93 @@ def display_conversation_stats():
             value=f"{stats['avg_response_time']:.2f}초",
             delta=None
         )
+    
+    # 두 번째 줄 통계
+    col5, col6 = st.columns(2)
+    
+    with col5:
+        st.metric(
+            label="평균 첫 토큰 시간",
+            value=f"{stats['avg_first_token_time']:.2f}초",
+            delta=None,
+            help="질문 후 첫 번째 응답이 나타나기까지의 시간"
+        )
 
 
-def display_streaming_response(response_generator: Generator, placeholder, metadata_placeholder=None):
+def display_current_settings():
+    """현재 적용된 설정 실시간 표시"""
+    settings = st.session_state.current_agent_settings
+    
+    # 설정 변경 여부에 따른 스타일링
+    if st.session_state.settings_changed:
+        status_class = "settings-changed-alert"
+        status_icon = "⚠️"
+        status_text = "설정이 변경되었습니다. 사이드바에서 '🔄 설정 적용' 버튼을 눌러 변경사항을 적용하세요."
+    else:
+        status_class = "settings-applied"
+        status_icon = "✅"
+        status_text = "최신 설정이 적용되어 있습니다. 모든 검색이 이 설정으로 실행됩니다."
+    
+    st.markdown(f"""
+    <div class="{status_class}">
+        <h3>{status_icon} 설정 상태</h3>
+        <p>{status_text}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 상세 설정 정보를 카드 형태로 표시
+    st.markdown("### ⚙️ 현재 적용된 설정")
+    
+    # 상세 설정 정보
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**🤖 모델 설정**")
+        st.info(f"""
+        - 모델: `{settings['model']}`
+        - 창의성: `{settings['temperature']}`
+        """)
+        
+        st.markdown("**🔍 검색 설정**")
+        st.info(f"""
+        - 검색 깊이: `{settings['search_depth'].upper()}`
+        - 최대 결과 수: `{settings['max_results']}개`
+        """)
+    
+    with col2:
+        st.markdown("**🌐 도메인 필터링**")
+        
+        # 포함 도메인
+        include_str = "제한 없음"
+        if settings['include_domains']:
+            include_str = "<br/>".join([f"✅ <code>{d}</code>" for d in settings['include_domains'][:5]])
+            if len(settings['include_domains']) > 5:
+                include_str += f"<br/>... 외 {len(settings['include_domains']) - 5}개"
+        
+        # 제외 도메인
+        exclude_str = "없음"
+        if settings['exclude_domains']:
+            exclude_str = "<br/>".join([f"❌ <code>{d}</code>" for d in settings['exclude_domains'][:5]])
+            if len(settings['exclude_domains']) > 5:
+                exclude_str += f"<br/>... 외 {len(settings['exclude_domains']) - 5}개"
+        
+        st.markdown(f"""
+        <div style="background-color: #e8f5e9; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #4caf50;">
+            <strong>포함 도메인:</strong><br/>
+            {include_str}
+            <br/><br/>
+            <strong>제외 도메인:</strong><br/>
+            {exclude_str}
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def display_streaming_response(response_generator: Generator, placeholder, metadata_placeholder=None, first_token_callback=None):
     """모든 스트리밍 모드 지원하는 응답 표시"""
     full_response = ""
     step_data = []
     token_buffer = ""
+    first_token_recorded = False  # 첫 토큰 기록 여부
     
     # 스트리밍 설정 가져오기
     settings = st.session_state.get("stream_settings", {})
@@ -236,20 +356,20 @@ def display_streaming_response(response_generator: Generator, placeholder, metad
             # (mode, data) 튜플 형태
             if isinstance(actual_data, tuple) and len(actual_data) == 2:
                 mode, data = actual_data
-                full_response = process_mode_data(mode, data, placeholder, full_response, token_buffer)
+                full_response = process_mode_data(mode, data, placeholder, full_response, token_buffer, first_token_callback)
             else:
                 # 오류 처리
                 display_error_info(actual_data, placeholder)
         else:
             # 단일 모드 처리
-            full_response = process_mode_data(stream_mode, actual_data, placeholder, full_response, token_buffer)
+            full_response = process_mode_data(stream_mode, actual_data, placeholder, full_response, token_buffer, first_token_callback)
         
         time.sleep(0.05)  # 스트리밍 효과
     
     return full_response
 
 
-def process_mode_data(mode: str, data, placeholder, current_response: str, token_buffer: str = ""):
+def process_mode_data(mode: str, data, placeholder, current_response: str, token_buffer: str = "", first_token_callback=None):
     """모드별 데이터 처리 통합 함수"""
     if mode == "values":
         return process_values_mode(data, placeholder, current_response)
@@ -258,7 +378,7 @@ def process_mode_data(mode: str, data, placeholder, current_response: str, token
     elif mode == "debug":
         return process_debug_mode(data, placeholder, current_response)
     elif mode == "messages":
-        return process_messages_mode(data, placeholder, current_response, token_buffer)
+        return process_messages_mode(data, placeholder, current_response, token_buffer, first_token_callback)
     elif mode == "custom":
         return process_custom_mode(data, placeholder, current_response)
     else:
@@ -345,7 +465,7 @@ def process_debug_mode(data, placeholder, current_response):
     return current_response
 
 
-def process_messages_mode(data, placeholder, current_response, token_buffer):
+def process_messages_mode(data, placeholder, current_response, token_buffer, first_token_callback=None):
     """MESSAGES 모드 - LLM 토큰 스트리밍 처리 (사용자 친화적)"""
     
     # 에러 처리 먼저 확인
@@ -381,6 +501,11 @@ def process_messages_mode(data, placeholder, current_response, token_buffer):
         # 메타데이터에서 노드 정보 확인
         node_info = metadata.get("langgraph_node", "unknown") if isinstance(metadata, dict) else "unknown"
         
+        # 첫 토큰 감지 및 콜백 호출
+        if token_content and first_token_callback and not hasattr(first_token_callback, '_called'):
+            first_token_callback()
+            first_token_callback._called = True  # 중복 호출 방지
+        
         # 도구 사용 감지 및 카운트 (중복 방지)
         if hasattr(message_chunk, 'tool_calls') and message_chunk.tool_calls:
             # 이미 카운트된 도구 호출인지 확인
@@ -410,20 +535,32 @@ def process_messages_mode(data, placeholder, current_response, token_buffer):
         
         # 도구 사용 중일 때 별도 표시
         elif node_info == "tools":
-            # 현재 도메인 설정 정보 가져오기
-            settings = st.session_state.get("stream_settings", {})
-            include_domains = settings.get("include_domains", [])
-            exclude_domains = settings.get("exclude_domains", [])
-            search_depth = settings.get("search_depth", "basic")
-            max_results = settings.get("max_results", 5)
+            # 현재 적용된 설정 정보 가져오기
+            current_settings = st.session_state.get("current_agent_settings", {})
+            include_domains = current_settings.get("include_domains", ["*.go.kr", "*.or.kr"])
+            exclude_domains = current_settings.get("exclude_domains", [])
+            search_depth = current_settings.get("search_depth", "basic")
+            max_results = current_settings.get("max_results", 5)
             
             # 도메인 필터링 정보 생성
-            domain_info = ""
+            domain_info_parts = []
+            
             if include_domains:
-                domain_info += f"포함 도메인: {', '.join(include_domains[:2])}{'...' if len(include_domains) > 2 else ''} | "
+                domain_list = ", ".join(include_domains[:3])
+                if len(include_domains) > 3:
+                    domain_list += f" 외 {len(include_domains) - 3}개"
+                domain_info_parts.append(f"포함: {domain_list}")
+            
             if exclude_domains:
-                domain_info += f"제외 도메인: {', '.join(exclude_domains[:2])}{'...' if len(exclude_domains) > 2 else ''} | "
-            domain_info += f"깊이: {search_depth} | 결과: {max_results}개"
+                domain_list = ", ".join(exclude_domains[:3])
+                if len(exclude_domains) > 3:
+                    domain_list += f" 외 {len(exclude_domains) - 3}개"
+                domain_info_parts.append(f"제외: {domain_list}")
+            
+            domain_info_parts.append(f"깊이: {search_depth.upper()}")
+            domain_info_parts.append(f"결과 수: {max_results}개")
+            
+            domain_info = " | ".join(domain_info_parts)
             
             with placeholder.container():
                 st.markdown(f"""
@@ -431,10 +568,11 @@ def process_messages_mode(data, placeholder, current_response, token_buffer):
                     <div style="font-weight: bold; color: #ff9800; margin-bottom: 0.5rem;">
                         🔍 정보 검색 중...
                     </div>
-                    <div style="color: #666; font-style: italic; margin-bottom: 0.25rem;">
+                    <div style="color: #666; font-style: italic; margin-bottom: 0.5rem;">
                         Tavily 검색 엔진을 통해 최신 정보를 찾고 있습니다.
                     </div>
-                    <div style="font-size: 0.8em; color: #888; background: #f0f0f0; padding: 0.25rem; border-radius: 0.25rem;">
+                    <div style="font-size: 0.85em; color: #555; background: #e8f5e9; padding: 0.5rem; border-radius: 0.25rem; border-left: 3px solid #4caf50;">
+                        <strong>적용된 검색 설정:</strong><br/>
                         {domain_info}
                     </div>
                 </div>
@@ -575,6 +713,7 @@ def display_metadata_info(step_data, metadata_placeholder):
 def process_streaming_query(user_input: str):
     """스트리밍 방식으로 쿼리 처리"""
     start_time = time.time()
+    first_token_time = None  # 첫 토큰 시간 추적
     
     # 사용자 메시지 추가
     st.session_state.messages.append({
@@ -586,8 +725,7 @@ def process_streaming_query(user_input: str):
     # 통계 업데이트
     st.session_state.conversation_stats["total_queries"] += 1
     
-    # 스트리밍 응답 컨테이너
-    response_placeholder = st.empty()
+    # 채팅 화면에서 직접 스트리밍하므로 별도 컨테이너 불필요
     
     try:
         # 스트리밍 설정 가져오기
@@ -609,22 +747,20 @@ def process_streaming_query(user_input: str):
                 stream_mode=stream_mode
             )
         
-        # 스트리밍 응답 표시
-        final_response = display_streaming_response(response_generator, response_placeholder)
+        # 첫 토큰 시간 콜백 함수
+        def record_first_token():
+            nonlocal first_token_time
+            if first_token_time is None:
+                first_token_time = time.time() - start_time
         
-        # 응답이 있든 없든 처리 완료로 간주
-        if final_response and final_response.strip():
-            response_content = final_response.strip()
-        else:
-            # messages 모드에서는 토큰이 실시간으로 표시되므로 빈 응답도 정상
-            response_content = "응답이 완료되었습니다."
+        # 채팅 화면에서 직접 스트리밍
+        final_response = process_chat_streaming(
+            response_generator,
+            first_token_callback=record_first_token
+        )
         
-        # 최종 응답 메시지 추가
-        st.session_state.messages.append({
-            "role": "assistant", 
-            "content": response_content,
-            "timestamp": time.strftime("%H:%M:%S")
-        })
+        # 응답 처리는 process_chat_streaming에서 완료됨
+        # 별도의 메시지 추가 불필요
         
         # 성공 통계 업데이트
         st.session_state.conversation_stats["successful_responses"] += 1
@@ -638,9 +774,13 @@ def process_streaming_query(user_input: str):
         new_avg = ((current_avg * (total_queries - 1)) + response_time) / total_queries
         st.session_state.conversation_stats["avg_response_time"] = new_avg
         
-        # 최종 완료 메시지 표시 (messages 모드에서는 이미 실시간으로 표시됨)
-        if stream_mode != "messages":
-            response_placeholder.empty()
+        # 평균 첫 토큰 시간 업데이트
+        if first_token_time is not None:
+            current_first_token_avg = st.session_state.conversation_stats["avg_first_token_time"]
+            new_first_token_avg = ((current_first_token_avg * (total_queries - 1)) + first_token_time) / total_queries
+            st.session_state.conversation_stats["avg_first_token_time"] = new_first_token_avg
+        
+        # 채팅 화면에서 직접 처리되므로 별도 정리 불필요
             
     except Exception as e:
         error_msg = f"처리 중 오류가 발생했습니다: {str(e)}"
@@ -650,8 +790,83 @@ def process_streaming_query(user_input: str):
             "content": error_msg,
             "timestamp": time.strftime("%H:%M:%S")
         })
+
+
+def process_chat_streaming(response_generator, first_token_callback=None):
+    """채팅 화면에서 직접 스트리밍 처리"""
+    # 스트리밍용 컨테이너 생성
+    streaming_container = st.empty()
+    
+    full_response = ""
+    first_token_recorded = False
+    
+    try:
+        # 초기 메시지 표시
+        with streaming_container.container():
+            st.chat_message("assistant").write("🤖 응답 생성 중...")
         
-        response_placeholder.empty()
+        for step in response_generator:
+            if isinstance(step, tuple) and len(step) == 2:
+                message_chunk, metadata = step
+                
+                # 토큰 내용 추출
+                if hasattr(message_chunk, 'content') and message_chunk.content:
+                    content = message_chunk.content
+                    
+                    # 깔끔한 모드: JSON 형태의 도구 결과 필터링
+                    if not (content.startswith('{"') and '"results"' in content):
+                        # 첫 토큰 시간 기록
+                        if not first_token_recorded and content.strip() and first_token_callback:
+                            first_token_callback()
+                            first_token_recorded = True
+                        
+                        full_response += content
+                        
+                        # 실시간으로 화면 업데이트
+                        with streaming_container.container():
+                            st.chat_message("assistant").write(f"**[{time.strftime('%H:%M:%S')}]** {full_response} ⚡")
+                
+                # 도구 사용 감지 및 카운트
+                if hasattr(message_chunk, 'tool_calls') and message_chunk.tool_calls:
+                    if "counted_tool_calls" not in st.session_state:
+                        st.session_state.counted_tool_calls = set()
+                    
+                    tool_call_id = f"{getattr(message_chunk, 'id', 'unknown')}_{message_chunk.tool_calls[0].get('name', 'unknown')}"
+                    
+                    if tool_call_id not in st.session_state.counted_tool_calls:
+                        st.session_state.conversation_stats["tool_usage_count"] += 1
+                        st.session_state.counted_tool_calls.add(tool_call_id)
+        
+        # 최종 응답 정리
+        final_response = full_response.strip() if full_response.strip() else "응답을 생성할 수 없습니다."
+        
+        # 최종 메시지를 세션에 저장
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": final_response,
+            "timestamp": time.strftime("%H:%M:%S")
+        })
+        
+        # 최종 메시지 표시 (스트리밍 완료)
+        with streaming_container.container():
+            st.chat_message("assistant").write(f"**[{time.strftime('%H:%M:%S')}]** {final_response}")
+        
+        return final_response
+        
+    except Exception as e:
+        # 에러 발생 시 처리
+        error_msg = f"응답 생성 중 오류가 발생했습니다: {str(e)}"
+        
+        st.session_state.messages.append({
+            "role": "error",
+            "content": error_msg,
+            "timestamp": time.strftime("%H:%M:%S")
+        })
+        
+        with streaming_container.container():
+            st.chat_message("assistant").error(f"**[{time.strftime('%H:%M:%S')}]** {error_msg}")
+        
+        return error_msg
 
 
 def display_advanced_sidebar():
@@ -674,10 +889,13 @@ def display_advanced_sidebar():
         
         # 모델 선택
         model_options = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+        current_model = st.session_state.current_agent_settings["model"]
+        current_index = model_options.index(current_model) if current_model in model_options else 0
+        
         selected_model = st.selectbox(
             "모델 선택",
             model_options,
-            index=0,
+            index=current_index,
             help="사용할 OpenAI 모델을 선택하세요"
         )
         
@@ -686,19 +904,22 @@ def display_advanced_sidebar():
             "창의성 수준 (Temperature)",
             min_value=0.0,
             max_value=1.0,
-            value=0.1,
+            value=st.session_state.current_agent_settings["temperature"],
             step=0.1,
             help="높을수록 더 창의적인 응답"
         )
         
-        
         # 검색 설정
         st.subheader("🔍 검색 설정")
         
+        search_depth_options = ["basic", "advanced"]
+        current_depth = st.session_state.current_agent_settings["search_depth"]
+        depth_index = search_depth_options.index(current_depth) if current_depth in search_depth_options else 0
+        
         search_depth = st.selectbox(
             "검색 깊이",
-            ["basic", "advanced"],
-            index=0,
+            search_depth_options,
+            index=depth_index,
             help="advanced는 더 정확하지만 비용이 2배"
         )
         
@@ -706,14 +927,33 @@ def display_advanced_sidebar():
             "최대 검색 결과 수",
             min_value=1,
             max_value=10,
-            value=5,
+            value=st.session_state.current_agent_settings["max_results"],
             help="더 많은 결과는 더 정확하지만 느림"
         )
+        
+        # 도메인 필터링 설정
+        st.subheader("🌐 도메인 필터링")
+        
+        # 포함 도메인
+        include_domains_text = st.text_area(
+            "포함할 도메인 (한 줄에 하나씩)",
+            value="\n".join(st.session_state.current_agent_settings["include_domains"]),
+            help="검색 결과에 포함할 도메인을 입력하세요. 예: *.go.kr, *.or.kr"
+        )
+        include_domains = [d.strip() for d in include_domains_text.split("\n") if d.strip()]
+        
+        # 제외 도메인
+        exclude_domains_text = st.text_area(
+            "제외할 도메인 (한 줄에 하나씩)",
+            value="\n".join(st.session_state.current_agent_settings["exclude_domains"]),
+            help="검색 결과에서 제외할 도메인을 입력하세요. 예: *.blog.*, *tistory.com"
+        )
+        exclude_domains = [d.strip() for d in exclude_domains_text.split("\n") if d.strip()]
         
         # 스트리밍 설정 (messages 모드 고정)
         st.subheader("🔄 스트리밍 설정")
         st.info("💬 **Messages 모드**: 실시간 토큰 스트리밍으로 빠른 응답 제공")
-        stream_mode = "messages"  # 고정
+        stream_mode = "messages"
         
         show_metadata = st.checkbox(
             "메타데이터 표시",
@@ -727,23 +967,21 @@ def display_advanced_sidebar():
             help="도구 결과나 시스템 메시지를 숨기고 AI 응답만 표시"
         )
         
-        # 도메인 필터링 상태 표시
-        st.subheader("🌐 도메인 필터링 상태")
+        # 설정 변경 감지
+        new_settings = {
+            "model": selected_model,
+            "temperature": temperature,
+            "search_depth": search_depth,
+            "max_results": max_results,
+            "include_domains": include_domains,
+            "exclude_domains": exclude_domains
+        }
         
-        # 현재 설정된 도메인 표시 (tools.py에서 하드코딩된 값)
-        current_include_domains = ["*.go.kr", "*.or.kr"]
-        current_exclude_domains = []
+        # 설정이 변경되었는지 확인
+        if new_settings != st.session_state.current_agent_settings:
+            st.session_state.settings_changed = True
         
-        st.info(f"""
-        **현재 적용된 도메인 필터링:**
-        - 🏛️ **포함 도메인**: {', '.join(current_include_domains)}
-        - 🚫 **제외 도메인**: {'없음' if not current_exclude_domains else ', '.join(current_exclude_domains)}
-        
-        """)
-        
-        
-        
-        # 세션 상태에 설정 저장
+        # 세션 상태에 스트리밍 설정 저장
         if "stream_settings" not in st.session_state:
             st.session_state.stream_settings = {}
         
@@ -753,20 +991,45 @@ def display_advanced_sidebar():
             "clean_mode": clean_mode,
             "search_depth": search_depth,
             "max_results": max_results,
-            "include_domains": current_include_domains,
-            "exclude_domains": current_exclude_domains
+            "include_domains": include_domains,
+            "exclude_domains": exclude_domains
         })
         
         # 에이전트 재초기화
-        if st.button("🔄 설정 적용", use_container_width=True):
+        st.markdown("---")
+        if st.button("🔄 설정 적용", use_container_width=True, type="primary"):
             try:
-                st.session_state.agent = SupervisedAgent(
-                    model_name=selected_model,
-                    temperature=temperature,
-                )
-                st.success("✅ 설정이 적용되었습니다!")
+                with st.spinner("⚙️ 새로운 설정을 적용하는 중..."):
+                    # 검색 설정 구성
+                    search_settings = {
+                        "max_results": max_results,
+                        "search_depth": search_depth,
+                        "include_domains": include_domains if include_domains else None,
+                        "exclude_domains": exclude_domains if exclude_domains else None,
+                    }
+                    
+                    # 에이전트 재생성 (새 설정 포함)
+                    st.session_state.agent = SupervisedAgent(
+                        model_name=selected_model,
+                        temperature=temperature,
+                        search_settings=search_settings,
+                    )
+                    
+                    # 현재 설정 업데이트
+                    st.session_state.current_agent_settings = new_settings.copy()
+                    st.session_state.settings_changed = False
+                    
+                st.success("✅ 설정이 성공적으로 적용되었습니다!")
+                time.sleep(1)
+                st.rerun()
             except Exception as e:
                 st.error(f"❌ 설정 적용 실패: {str(e)}")
+        
+        # 현재 적용된 설정 미리보기
+        if st.session_state.settings_changed:
+            st.warning("⚠️ 변경사항이 아직 적용되지 않았습니다.")
+        else:
+            st.success("✅ 최신 설정이 적용되어 있습니다.")
         
         st.markdown("---")
         
@@ -781,7 +1044,8 @@ def display_advanced_sidebar():
                 "total_queries": 0,
                 "successful_responses": 0,
                 "tool_usage_count": 0,
-                "avg_response_time": 0.0
+                "avg_response_time": 0.0,
+                "avg_first_token_time": 0.0
             }
             # 카운트된 도구 호출 기록도 초기화
             if "counted_tool_calls" in st.session_state:
@@ -827,6 +1091,11 @@ def display_advanced_sidebar():
 
 def display_advanced_chat():
     """고급 채팅 인터페이스"""
+    # 현재 적용된 설정 실시간 표시
+    display_current_settings()
+    
+    st.markdown("---")
+    
     # 대화 통계 표시
     st.subheader("📊 대화 통계")
     display_conversation_stats()
@@ -847,11 +1116,17 @@ def display_advanced_chat():
             role = message["role"]
             content = message["content"]
             timestamp = message.get("timestamp", "")
+            is_streaming = message.get("streaming", False)
             
             if role == "user":
                 st.chat_message("user").write(f"**[{timestamp}]** {content}")
             elif role == "assistant":
-                st.chat_message("assistant").write(f"**[{timestamp}]** {content}")
+                if is_streaming:
+                    # 스트리밍 중인 메시지는 실시간 표시
+                    st.chat_message("assistant").write(f"**[{timestamp}]** {content} ⚡")
+                else:
+                    # 완료된 메시지는 일반 표시
+                    st.chat_message("assistant").write(f"**[{timestamp}]** {content}")
             else:  # error
                 st.chat_message("assistant").error(f"**[{timestamp}]** {content}")
     

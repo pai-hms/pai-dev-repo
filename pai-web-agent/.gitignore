@@ -1,2 +1,4 @@
 .env
 .cursor/
+tavily_search_implementation_guide.md
+__pycache__/

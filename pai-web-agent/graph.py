@@ -21,17 +21,30 @@ class SimpleReactGraph:
     에이전트가 스스로 도구 사용을 판단하고 실행
     """
     
-    def __init__(self, llm: ChatOpenAI):
+    def __init__(self, llm: ChatOpenAI, search_settings: Optional[Dict[str, Any]] = None):
         """
         그래프 초기화
         
         Args:
             llm: OpenAI LLM 인스턴스
+            search_settings: Tavily 검색 설정
         """
         self.llm = llm
+        self.search_settings = search_settings or {}
         
-        # 도구 생성
-        self.tavily_tool = create_tavily_tool()
+        # 검색 설정에서 Tavily 파라미터 추출
+        max_results = self.search_settings.get("max_results", 5)
+        search_depth = self.search_settings.get("search_depth", "basic")
+        include_domains = self.search_settings.get("include_domains", None)
+        exclude_domains = self.search_settings.get("exclude_domains", None)
+        
+        # 도구 생성 (설정 반영)
+        self.tavily_tool = create_tavily_tool(
+            max_results=max_results,
+            search_depth=search_depth,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
         tools = [self.tavily_tool.get_tool_for_agent()]
         
         # React 에이전트 생성 (메모리 없음)
@@ -113,14 +126,15 @@ class SimpleReactGraph:
     
 
 
-def create_public_info_graph(llm: ChatOpenAI) -> SimpleReactGraph:
+def create_public_info_graph(llm: ChatOpenAI, search_settings: Optional[Dict[str, Any]] = None) -> SimpleReactGraph:
     """
     공공기관 정보 검색 그래프 생성 팩토리 함수
     
     Args:
         llm: OpenAI LLM 인스턴스
+        search_settings: Tavily 검색 설정 (max_results, search_depth, include_domains, exclude_domains)
         
     Returns:
         SimpleReactGraph 인스턴스
     """
-    return SimpleReactGraph(llm)
+    return SimpleReactGraph(llm, search_settings)

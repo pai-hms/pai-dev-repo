@@ -22,13 +22,15 @@ class SupervisedAgent:
     3. 응답 생성 - 구조화된 최종 답변 제공
     """
     
-    def __init__(self, model_name: str = "gpt-4o-mini", temperature: float = 0.1):
+    def __init__(self, model_name: str = "gpt-4o-mini", temperature: float = 0.1, 
+                 search_settings: Optional[Dict[str, Any]] = None):
         """
         Supervised Agent 초기화
         
         Args:
             model_name: 사용할 OpenAI 모델명
             temperature: 모델의 창의성 수준 (0.0 ~ 1.0)
+            search_settings: Tavily 검색 설정 (옵션)
         """
         # OpenAI API 키 확인
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -46,8 +48,12 @@ class SupervisedAgent:
             api_key=self.openai_api_key
         )
         
-        # 공공기관 정보 검색 그래프 초기화
-        self.graph = create_public_info_graph(self.llm)
+        # 검색 설정 가져오기 (인자로 전달되거나 세션에서 가져오기)
+        if search_settings is None:
+            search_settings = self._get_search_settings()
+        
+        # 공공기관 정보 검색 그래프 초기화 (설정 전달)
+        self.graph = create_public_info_graph(self.llm, search_settings)
         
         # 시스템 프롬프트 저장 (호환성을 위해)
         self.system_message = get_system_prompt()
@@ -205,15 +211,17 @@ class SupervisedAgent:
         }
 
 
-def create_agent(model_name: str = "gpt-4o-mini", temperature: float = 0.1) -> SupervisedAgent:
+def create_agent(model_name: str = "gpt-4o-mini", temperature: float = 0.1, 
+                search_settings: Optional[Dict[str, Any]] = None) -> SupervisedAgent:
     """
     Supervised Agent 인스턴스 생성 팩토리 함수
     
     Args:
         model_name: 사용할 OpenAI 모델명
         temperature: 모델의 창의성 수준
+        search_settings: Tavily 검색 설정 (옵션)
     """
-    return SupervisedAgent(model_name=model_name, temperature=temperature)
+    return SupervisedAgent(model_name=model_name, temperature=temperature, search_settings=search_settings)
 
 
 # 메인 실행 함수
