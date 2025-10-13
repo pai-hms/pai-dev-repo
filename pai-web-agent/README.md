@@ -90,5 +90,5 @@ uv run python agent.py
 ## 스크린샷
 
 ### 데모
-![메인 화면](./docs/images/maine.png)
+![메인 화면](./docs/images/main.png)
 ![응답](./docs/images/answer.png)
