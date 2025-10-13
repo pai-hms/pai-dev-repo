@@ -127,7 +127,7 @@ def initialize_session_state():
         st.session_state.api_keys_set = False
     if "current_agent_settings" not in st.session_state:
         st.session_state.current_agent_settings = {
-            "model": "gpt-4o-mini",
+            "model": "gpt-4.1-mini",
             "temperature": 0.1,
             "search_depth": "basic",
             "max_results": 5,
@@ -888,7 +888,7 @@ def display_advanced_sidebar():
         st.subheader("🔧 에이전트 설정")
         
         # 모델 선택
-        model_options = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+        model_options = ["gpt-4.1-mini", "gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
         current_model = st.session_state.current_agent_settings["model"]
         current_index = model_options.index(current_model) if current_model in model_options else 0
         

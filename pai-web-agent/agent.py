@@ -22,7 +22,7 @@ class SupervisedAgent:
     3. 응답 생성 - 구조화된 최종 답변 제공
     """
     
-    def __init__(self, model_name: str = "gpt-4o-mini", temperature: float = 0.1, 
+    def __init__(self, model_name: str = "gpt-4.1-mini", temperature: float = 0.1, 
                  search_settings: Optional[Dict[str, Any]] = None):
         """
         Supervised Agent 초기화
@@ -211,7 +211,7 @@ class SupervisedAgent:
         }
 
 
-def create_agent(model_name: str = "gpt-4o-mini", temperature: float = 0.1, 
+def create_agent(model_name: str = "gpt-4.1-mini", temperature: float = 0.1, 
                 search_settings: Optional[Dict[str, Any]] = None) -> SupervisedAgent:
     """
     Supervised Agent 인스턴스 생성 팩토리 함수

@@ -66,7 +66,8 @@ uv run python agent.py
 ## 모델 설정
 
 ### OpenAI 모델
-- `gpt-4o-mini`: 빠르고 경제적 (권장)
+- `gpt-4.1-mini`: 명령어 따르기와 도구 호출 최적화, 1M 컨텍스트 (권장)
+- `gpt-4o-mini`: 빠르고 경제적
 - `gpt-4o`: 높은 정확도, 높은 비용
 - `gpt-3.5-turbo`: 가장 빠름, 낮은 성능
 
